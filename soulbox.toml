@@ -1,0 +1,106 @@
+# SoulBox Configuration File
+# Based on the complete specification from our documentation
+
+[project]
+name = "soulbox"
+version = "0.1.0"
+description = "High-performance Rust-based AI code execution sandbox"
+
+[server]
+host = "0.0.0.0"
+port = 8080
+workers = 4
+max_connections = 1000
+
+[database]
+url = "postgresql://soulbox:password@localhost:5432/soulbox"
+max_connections = 20
+min_connections = 5
+
+[redis]
+url = "redis://localhost:6379"
+pool_size = 10
+
+[auth]
+jwt_secret = "your-super-secret-jwt-key-change-this-in-production"
+jwt_expiry_hours = 24
+api_key_prefix = "sb_"
+
+[sandbox]
+max_sandboxes = 100
+default_timeout_seconds = 300
+max_memory_mb = 1024
+max_cpu_cores = 2.0
+
+[logging]
+level = "info"
+format = "json"
+
+[template]
+# Template system configuration
+default_base_image = "ubuntu:22.04"
+build_timeout_seconds = 600
+registry_url = "ghcr.io/yourusername/soulbox-templates"
+
+[runtime]
+# Multi-runtime version support
+python = "3.11.6"
+nodejs = "20.9.0"
+bun = "1.0.0"
+deno = "1.37.0"
+
+[runtime.package_managers]
+npm = "10.2.0"
+yarn = "4.0.0"
+pnpm = "8.9.0"
+pip = "23.3.0"
+poetry = "1.6.0"
+
+[commands]
+# Default commands for sandbox lifecycle
+start = ["echo", "SoulBox sandbox started"]
+ready = ["echo", "Ready"]
+health = ["echo", "Healthy"]
+
+[resources]
+# Resource limits
+cpu_cores = 2
+memory_mb = 1024
+disk_mb = 5120
+timeout_hours = 24
+gpu = false
+gpu_memory_gb = 0
+
+[environment]
+# Environment variables
+NODE_ENV = "development"
+RUST_LOG = "info"
+
+[network]
+# Network configuration
+ports = [8080, 9090]
+allow_internet = true
+allow_localhost = true
+
+[security]
+# Security settings
+allow_docker = false
+allow_sudo = false
+read_only = false
+user = "soulbox"
+group = "soulbox"
+
+[monitoring]
+# Monitoring and observability
+enable_metrics = true
+enable_tracing = true
+enable_logging = true
+prometheus_port = 9091
+
+[features]
+# Feature flags
+jupyter_support = true
+gpu_support = false
+distributed = false
+browser_automation = false
+ai_integration = true

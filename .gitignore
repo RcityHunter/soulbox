@@ -1,0 +1,46 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+
+# Database
+*.db
+*.sqlite
+
+# Docker
+docker-compose.override.yml
+
+# Generated files
+/proto/generated/
+
+# Coverage
+/coverage/
+*.profraw
+
+# Benchmarks
+/bench/
+
+# Documentation build
+/target/doc/
+
+# Test results
+/test-results/
