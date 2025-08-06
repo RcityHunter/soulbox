@@ -25,6 +25,15 @@ pub enum SoulBoxError {
     #[error("TOML error: {0}")]
     Toml(#[from] toml::de::Error),
 
+    #[error("WebSocket error: {0}")]
+    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
+
+    #[error("gRPC transport error: {0}")]
+    Transport(#[from] tonic::transport::Error),
+
+    #[error("gRPC status error: {0}")]
+    Status(#[from] tonic::Status),
+
     #[error("Internal error: {0}")]
     Internal(String),
 }

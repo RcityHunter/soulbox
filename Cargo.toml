@@ -37,6 +37,34 @@ dotenvy = "0.15"
 # UUID
 uuid = { version = "1.6", features = ["v4", "serde"] }
 
+# gRPC and Protocol Buffers
+tonic = "0.10"
+tonic-build = "0.10"
+prost = "0.12"
+
+# WebSocket
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
+
+# HTTP
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Testing
+mockall = "0.12"
+
+# Async streams
+async-stream = "0.3"
+tokio-stream = "0.1"
+
+# Additional utilities
+futures = "0.3"
+prost-types = "0.12"
+
+[build-dependencies]
+tonic-build = "0.10"
+
 [[bin]]
 name = "soulbox"
 path = "src/main.rs"
