@@ -60,7 +60,7 @@ impl Default for Config {
             server: ServerConfig {
                 host: "0.0.0.0".to_string(),
                 port: 8080,
-                workers: num_cpus::get(),
+                workers: 4,
                 max_connections: 1000,
             },
             database: DatabaseConfig {
