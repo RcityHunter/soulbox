@@ -41,6 +41,11 @@ impl SoulBoxServiceImpl {
         }
     }
 
+    pub async fn set_container_manager(&self, _manager: crate::container::ContainerManager) {
+        // TODO: Store container manager for actual container operations
+        // For now, this is just a placeholder for testing
+    }
+
     async fn create_mock_sandbox(&self, request: &CreateSandboxRequest) -> MockSandbox {
         let sandbox_id = format!("sb_{}", Uuid::new_v4().to_string().replace("-", "")[..8].to_lowercase());
         let now = std::time::SystemTime::now()
