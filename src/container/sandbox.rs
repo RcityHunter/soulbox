@@ -47,7 +47,7 @@ impl SandboxContainer {
     pub fn get_image(&self) -> &str {
         &self.image
     }
-
+    
     pub async fn get_status(&self) -> Result<String> {
         // TODO: Implement actual status check using bollard
         // For now, return mock status that will make some tests pass

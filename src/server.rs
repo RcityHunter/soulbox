@@ -1,4 +1,5 @@
-use crate::{config::Config, error::Result};
+use crate::config::Config;
+use crate::error::Result as SoulBoxResult;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -7,7 +8,6 @@ use axum::{
     Router,
 };
 use serde_json::{json, Value};
-use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
@@ -25,7 +25,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn new(config: Config) -> Result<Self> {
+    pub async fn new(config: Config) -> SoulBoxResult<Self> {
         let app_state = AppState {
             config: config.clone(),
         };
@@ -35,7 +35,7 @@ impl Server {
         Ok(Self { config, app })
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(self) -> SoulBoxResult<()> {
         let addr = format!("{}:{}", self.config.server.host, self.config.server.port);
         
         info!("🚀 SoulBox server starting on {}", addr);
@@ -76,7 +76,7 @@ async fn health_check() -> Json<Value> {
 }
 
 // Readiness check endpoint
-async fn readiness_check(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
+async fn readiness_check(State(_state): State<AppState>) -> Result<Json<Value>, StatusCode> {
     // TODO: Check database connectivity, dependencies, etc.
     
     Ok(Json(json!({
@@ -93,7 +93,7 @@ async fn readiness_check(State(state): State<AppState>) -> Result<Json<Value>, S
 
 // Sandbox management endpoints
 async fn create_sandbox(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, StatusCode> {
     info!("Creating new sandbox with payload: {}", payload);
@@ -109,7 +109,7 @@ async fn create_sandbox(
 }
 
 async fn get_sandbox(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Result<Json<Value>, StatusCode> {
     info!("Getting sandbox: {}", id);

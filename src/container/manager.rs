@@ -2,20 +2,22 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::error::Result;
+use crate::{error::Result, config::Config};
 use super::{SandboxContainer, ResourceLimits, NetworkConfig};
 
 #[derive(Debug, Clone)]
 pub struct ContainerManager {
     // This will initially be a simple mock implementation
     containers: Arc<Mutex<HashMap<String, Arc<SandboxContainer>>>>,
+    config: Config,
 }
 
 impl ContainerManager {
-    pub async fn new() -> Result<Self> {
+    pub async fn new(config: Config) -> Result<Self> {
         // TODO: Initialize Docker client and verify Docker is available
         Ok(Self {
             containers: Arc::new(Mutex::new(HashMap::new())),
+            config,
         })
     }
 

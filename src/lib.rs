@@ -4,11 +4,10 @@ pub mod grpc;
 pub mod websocket;
 pub mod container;
 pub mod filesystem;
-
-// TODO: Add other modules as we implement them
-// pub mod server;
-// pub mod auth;
-// pub mod api;
+pub mod server;
+pub mod auth;
+pub mod api;
+pub mod sandbox;
 
 pub use config::Config;
 pub use error::{SoulBoxError, Result};
