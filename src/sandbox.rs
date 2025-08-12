@@ -1,4 +1,4 @@
-use crate::{config::Config, error::Result};
+use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -101,7 +101,7 @@ impl Sandbox {
         let result = match language {
             "python" => self.execute_python(code).await?,
             "javascript" | "typescript" => self.execute_node(code).await?,
-            _ => return Err(crate::error::SoulBoxError::sandbox(format!("Unsupported language: {}", language))),
+            _ => return Err(crate::error::SoulBoxError::sandbox(format!("Unsupported language: {language}"))),
         };
         
         let execution_time = start_time.elapsed().as_millis() as u64;
@@ -118,14 +118,14 @@ impl Sandbox {
     async fn execute_python(&self, code: &str) -> Result<String> {
         // TODO: Implement Python execution
         // For now, just return a placeholder
-        Ok(format!("Python execution result for: {}", code))
+        Ok(format!("Python execution result for: {code}"))
     }
 
     /// Execute Node.js code
     async fn execute_node(&self, code: &str) -> Result<String> {
         // TODO: Implement Node.js execution
         // For now, just return a placeholder
-        Ok(format!("Node.js execution result for: {}", code))
+        Ok(format!("Node.js execution result for: {code}"))
     }
 
     /// Check if sandbox is healthy

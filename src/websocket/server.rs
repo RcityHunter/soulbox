@@ -1,14 +1,20 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_tungstenite::{accept_async, WebSocketStream};
-use tracing::{info, error, warn};
+use tokio_tungstenite::accept_async;
+use tracing::{info, error};
 
 use super::handler::WebSocketHandler;
 use crate::error::Result;
 
 pub struct WebSocketServer {
     handler: Arc<WebSocketHandler>,
+}
+
+impl Default for WebSocketServer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl WebSocketServer {

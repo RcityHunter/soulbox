@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_stream::{Stream, StreamExt};
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 // Import generated protobuf types
@@ -31,6 +31,12 @@ pub struct MockSandbox {
 pub struct SoulBoxServiceImpl {
     sandboxes: Arc<Mutex<HashMap<String, MockSandbox>>>,
     executions: Arc<Mutex<HashMap<String, String>>>, // execution_id -> sandbox_id
+}
+
+impl Default for SoulBoxServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SoulBoxServiceImpl {
@@ -65,7 +71,7 @@ impl SoulBoxServiceImpl {
             created_at: Some(timestamp.clone()),
             updated_at: Some(timestamp),
             environment_variables: request.environment_variables.clone(),
-            endpoint_url: format!("https://sandbox-{}.soulbox.dev", sandbox_id),
+            endpoint_url: format!("https://sandbox-{sandbox_id}.soulbox.dev"),
         }
     }
 }
@@ -329,7 +335,7 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
                             ExecutionOutput {
                                 execution_id: execution_id.clone(),
                                 r#type: OutputType::Stdout as i32,
-                                data: format!("Step {}\n", i),
+                                data: format!("Step {i}\n"),
                             }
                         ))
                     });

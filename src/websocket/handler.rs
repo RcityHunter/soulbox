@@ -24,6 +24,12 @@ pub struct ConnectionInfo {
     pub stream_id: Option<String>,
 }
 
+impl Default for WebSocketHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WebSocketHandler {
     pub fn new() -> Self {
         Self {
@@ -67,7 +73,7 @@ impl WebSocketHandler {
                         }
                         Err(e) => {
                             error!("Error handling message for {}: {}", connection_id, e);
-                            let error_response = WebSocketResponse::error(&format!("Internal error: {}", e), Some("INTERNAL_ERROR"));
+                            let error_response = WebSocketResponse::error(&format!("Internal error: {e}"), Some("INTERNAL_ERROR"));
                             if let Ok(response_text) = serde_json::to_string(&error_response) {
                                 let _ = ws_stream.send(Message::Text(response_text)).await;
                             }
@@ -418,7 +424,7 @@ impl WebSocketHandler {
             for i in 1..=3 {
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 
-                let output_response = WebSocketResponse::execution_output(&execution_id, &format!("Step {}\n", i));
+                let output_response = WebSocketResponse::execution_output(&execution_id, &format!("Step {i}\n"));
                 let response_text = serde_json::to_string(&output_response)?;
                 ws_stream.send(Message::Text(response_text)).await?;
             }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_stream::{Stream, StreamExt};
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{info, warn, error};
+use tracing::{info, error};
 use uuid::Uuid;
 
 // Import generated protobuf types
@@ -18,6 +18,12 @@ pub use soulbox_proto::*;
 pub struct StreamingServiceImpl {
     active_streams: Arc<Mutex<HashMap<String, String>>>, // stream_id -> sandbox_id
     active_terminals: Arc<Mutex<HashMap<String, String>>>, // terminal_id -> sandbox_id
+}
+
+impl Default for StreamingServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StreamingServiceImpl {
@@ -148,7 +154,7 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                             response: Some(sandbox_stream_response::Response::Error(
                                 SandboxStreamError {
                                     stream_id: stream_id.clone(),
-                                    error_message: format!("Stream error: {}", e),
+                                    error_message: format!("Stream error: {e}"),
                                 }
                             ))
                         });
@@ -251,7 +257,7 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                                         response: Some(terminal_stream_response::Response::Output(
                                             TerminalOutput {
                                                 terminal_id: terminal_id.clone(),
-                                                data: format!("{}\n", working_dir).as_bytes().to_vec(),
+                                                data: format!("{working_dir}\n").as_bytes().to_vec(),
                                             }
                                         ))
                                     });
@@ -317,7 +323,7 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                             response: Some(terminal_stream_response::Response::Error(
                                 TerminalError {
                                     terminal_id: terminal_id.clone(),
-                                    error_message: format!("Terminal stream error: {}", e),
+                                    error_message: format!("Terminal stream error: {e}"),
                                 }
                             ))
                         });

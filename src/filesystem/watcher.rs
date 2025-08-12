@@ -46,7 +46,7 @@ impl FileWatcher {
                     let _ = sender.send(file_event);
                 }
             }
-        }).map_err(|e| SoulBoxError::filesystem(format!("Failed to create file watcher: {}", e)))?;
+        }).map_err(|e| SoulBoxError::filesystem(format!("Failed to create file watcher: {e}")))?;
 
         let mode = if recursive {
             RecursiveMode::Recursive
@@ -55,7 +55,7 @@ impl FileWatcher {
         };
 
         watcher.watch(&path, mode)
-            .map_err(|e| SoulBoxError::filesystem(format!("Failed to watch path: {}", e)))?;
+            .map_err(|e| SoulBoxError::filesystem(format!("Failed to watch path: {e}")))?;
 
         Ok(Self {
             receiver,

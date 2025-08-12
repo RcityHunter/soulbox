@@ -7,6 +7,12 @@ pub struct AuthService {
     // TODO: Add authentication logic
 }
 
+impl Default for AuthService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AuthService {
     pub fn new() -> Self {
         Self {}

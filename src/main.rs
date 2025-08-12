@@ -1,8 +1,6 @@
 use anyhow::Result;
 use tracing::{info, error};
-use tracing_subscriber;
 use std::net::SocketAddr;
-use tokio::net::TcpListener;
 
 mod config;
 mod error;

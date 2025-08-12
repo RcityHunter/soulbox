@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use tempfile::TempDir;
 
 use crate::error::Result;

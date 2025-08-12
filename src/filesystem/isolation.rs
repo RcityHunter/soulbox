@@ -41,7 +41,7 @@ impl FileSystemIsolation {
         file_limit_bytes: Option<u64>,
     ) -> Result<()> {
         let temp_dir = tempfile::tempdir()
-            .map_err(|e| SoulBoxError::filesystem(format!("Failed to create temp directory: {}", e)))?;
+            .map_err(|e| SoulBoxError::filesystem(format!("Failed to create temp directory: {e}")))?;
         
         let sandbox_fs = super::SandboxFileSystem::new(
             temp_dir.path().to_path_buf(),
@@ -57,18 +57,18 @@ impl FileSystemIsolation {
     pub fn get_filesystem(&self, sandbox_id: &str) -> Result<&super::SandboxFileSystem> {
         self.sandbox_filesystems
             .get(sandbox_id)
-            .ok_or_else(|| SoulBoxError::filesystem(format!("Sandbox filesystem not found: {}", sandbox_id)))
+            .ok_or_else(|| SoulBoxError::filesystem(format!("Sandbox filesystem not found: {sandbox_id}")))
     }
 
     pub fn get_filesystem_mut(&mut self, sandbox_id: &str) -> Result<&mut super::SandboxFileSystem> {
         self.sandbox_filesystems
             .get_mut(sandbox_id)
-            .ok_or_else(|| SoulBoxError::filesystem(format!("Sandbox filesystem not found: {}", sandbox_id)))
+            .ok_or_else(|| SoulBoxError::filesystem(format!("Sandbox filesystem not found: {sandbox_id}")))
     }
 
     pub async fn remove_isolated_filesystem(&mut self, sandbox_id: &str) -> Result<()> {
         self.sandbox_filesystems.remove(sandbox_id)
-            .ok_or_else(|| SoulBoxError::filesystem(format!("Sandbox filesystem not found: {}", sandbox_id)))?;
+            .ok_or_else(|| SoulBoxError::filesystem(format!("Sandbox filesystem not found: {sandbox_id}")))?;
         Ok(())
     }
 

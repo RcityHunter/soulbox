@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::collections::HashMap;
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -76,7 +76,7 @@ impl SandboxFileSystem {
             let current_usage = self.get_disk_usage().await?.used_bytes;
             if current_usage + content.len() as u64 > total_limit {
                 return Err(SoulBoxError::resource_limit(
-                    format!("Total filesystem usage would exceed limit {}", total_limit)
+                    format!("Total filesystem usage would exceed limit {total_limit}")
                 ));
             }
         }
@@ -98,7 +98,7 @@ impl SandboxFileSystem {
         
         if !full_path.exists() {
             return Err(SoulBoxError::filesystem(
-                format!("File not found: {}", path)
+                format!("File not found: {path}")
             ));
         }
 
@@ -113,7 +113,7 @@ impl SandboxFileSystem {
         
         if !full_path.exists() {
             return Err(SoulBoxError::filesystem(
-                format!("File not found: {}", path)
+                format!("File not found: {path}")
             ));
         }
 
@@ -138,7 +138,7 @@ impl SandboxFileSystem {
         
         if !full_path.exists() {
             return Err(SoulBoxError::filesystem(
-                format!("Directory not found: {}", path)
+                format!("Directory not found: {path}")
             ));
         }
 
@@ -172,7 +172,7 @@ impl SandboxFileSystem {
         // For now, just verify the file exists
         if !full_path.exists() {
             return Err(SoulBoxError::filesystem(
-                format!("File not found: {}", path)
+                format!("File not found: {path}")
             ));
         }
 
@@ -184,7 +184,7 @@ impl SandboxFileSystem {
         
         if !full_path.exists() {
             return Err(SoulBoxError::filesystem(
-                format!("File not found: {}", path)
+                format!("File not found: {path}")
             ));
         }
 
@@ -197,7 +197,7 @@ impl SandboxFileSystem {
         let target_full = self.resolve_path(target_path)?;
         if !target_full.starts_with(&self.root_path) {
             return Err(SoulBoxError::security(
-                format!("Symlink target outside sandbox: {}", target_path)
+                format!("Symlink target outside sandbox: {target_path}")
             ));
         }
 
@@ -223,7 +223,7 @@ impl SandboxFileSystem {
         
         if !full_path.exists() {
             return Err(SoulBoxError::filesystem(
-                format!("File not found: {}", path)
+                format!("File not found: {path}")
             ));
         }
 
@@ -299,7 +299,7 @@ impl SandboxFileSystem {
         let snapshot_id = format!("snapshot_{}_{}", name, chrono::Utc::now().timestamp());
         let snapshot_path = self.root_path.parent()
             .unwrap()
-            .join(format!("{}_snapshot", snapshot_id));
+            .join(format!("{snapshot_id}_snapshot"));
 
         // TODO: Implement actual filesystem snapshot
         // For now, just create an empty directory as a placeholder
@@ -312,7 +312,7 @@ impl SandboxFileSystem {
     pub async fn restore_from_snapshot(&self, snapshot_id: &str) -> Result<()> {
         let _snapshot_path = self.snapshots.get(snapshot_id)
             .ok_or_else(|| SoulBoxError::filesystem(
-                format!("Snapshot not found: {}", snapshot_id)
+                format!("Snapshot not found: {snapshot_id}")
             ))?;
 
         // TODO: Implement actual snapshot restoration
@@ -350,7 +350,7 @@ impl SandboxFileSystem {
 
         if !resolved_path.starts_with(&canonical_root) {
             return Err(SoulBoxError::security(
-                format!("Path outside sandbox: {}", path)
+                format!("Path outside sandbox: {path}")
             ));
         }
 
