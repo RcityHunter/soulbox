@@ -40,12 +40,20 @@ pub struct AuthConfig {
     pub api_key_prefix: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct SandboxConfig {
     pub max_sandboxes: usize,
     pub default_timeout_seconds: u64,
     pub max_memory_mb: u64,
     pub max_cpu_cores: f32,
+    pub runtime: RuntimeConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct RuntimeConfig {
+    pub runtime_type: String, // "docker" or "firecracker"
+    pub firecracker_kernel_path: Option<String>,
+    pub firecracker_rootfs_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -82,6 +90,11 @@ impl Default for Config {
                 default_timeout_seconds: 300,
                 max_memory_mb: 1024,
                 max_cpu_cores: 2.0,
+                runtime: RuntimeConfig {
+                    runtime_type: "firecracker".to_string(), // Default to Firecracker
+                    firecracker_kernel_path: Some("/opt/firecracker/vmlinux".to_string()),
+                    firecracker_rootfs_path: Some("/opt/firecracker/rootfs".to_string()),
+                },
             },
             logging: LoggingConfig {
                 level: "info".to_string(),

@@ -6,7 +6,7 @@ use bollard::Docker;
 use bollard::container::{StartContainerOptions, StopContainerOptions, RemoveContainerOptions, StatsOptions};
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use futures_util::stream::StreamExt;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
 use crate::error::{Result, SoulBoxError};
 use super::{ResourceLimits, NetworkConfig, PortMapping};
@@ -227,16 +227,16 @@ impl SandboxContainer {
         })).next().await {
             Some(Ok(stats)) => {
                 let memory_usage = stats.memory_stats
-                    .and_then(|mem| mem.usage)
+                    .usage
                     .unwrap_or(0) / (1024 * 1024); // Convert to MB
                 
-                let cpu_usage = if let (Some(cpu_stats), Some(precpu_stats)) = 
+                let cpu_usage = if let (cpu_stats, precpu_stats) = 
                     (&stats.cpu_stats, &stats.precpu_stats) {
-                    if let (Some(cpu_usage), Some(system_usage), Some(precpu_usage), Some(presystem_usage)) = 
-                        (cpu_stats.cpu_usage.as_ref().and_then(|u| u.total_usage),
-                         cpu_stats.system_cpu_usage,
-                         precpu_stats.cpu_usage.as_ref().and_then(|u| u.total_usage),
-                         precpu_stats.system_cpu_usage) {
+                    if let (Some(system_usage), Some(presystem_usage)) = 
+                        (cpu_stats.system_cpu_usage, precpu_stats.system_cpu_usage) {
+                        
+                        let cpu_usage = cpu_stats.cpu_usage.total_usage;
+                        let precpu_usage = precpu_stats.cpu_usage.total_usage;
                         
                         let cpu_delta = cpu_usage as f64 - precpu_usage as f64;
                         let system_delta = system_usage as f64 - presystem_usage as f64;
@@ -256,13 +256,13 @@ impl SandboxContainer {
                 let network_rx = stats.networks
                     .as_ref()
                     .and_then(|nets| nets.values().next())
-                    .and_then(|net| net.rx_bytes)
+                    .map(|net| net.rx_bytes)
                     .unwrap_or(0);
                     
                 let network_tx = stats.networks
                     .as_ref()
                     .and_then(|nets| nets.values().next())
-                    .and_then(|net| net.tx_bytes)
+                    .map(|net| net.tx_bytes)
                     .unwrap_or(0);
 
                 Ok(ResourceStats {

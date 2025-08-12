@@ -3,6 +3,7 @@ pub mod error;
 pub mod grpc;
 pub mod websocket;
 pub mod container;
+pub mod firecracker;
 pub mod filesystem;
 pub mod server;
 pub mod auth;

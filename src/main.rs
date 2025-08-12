@@ -1,12 +1,15 @@
 use anyhow::Result;
 use tracing::{info, error};
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 mod config;
 mod error;
 mod server;
 mod grpc;
 mod container;
+mod sandbox;
+mod firecracker;
 
 use config::Config;
 use server::Server;
@@ -38,30 +41,47 @@ async fn main() -> Result<()> {
     });
 
     // Start the gRPC server
-    let grpc_addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port + 1000)
+    let grpc_port = config.server.port + 1000;
+    let grpc_addr: SocketAddr = format!("{}:{}", config.server.host, grpc_port)
         .parse()
         .map_err(|e| anyhow::anyhow!("Invalid gRPC address: {}", e))?;
     
     let grpc_service = grpc::service::SoulBoxServiceImpl::new();
     
-    // Initialize container manager
-    let container_manager = container::ContainerManager::new(config.clone()).await?;
-    grpc_service.set_container_manager(container_manager).await;
+    // Initialize runtime based on configuration
+    let runtime: Arc<dyn sandbox::SandboxRuntime> = match config.sandbox.runtime.runtime_type.as_str() {
+        "docker" => {
+            info!("Using Docker runtime");
+            let container_manager = container::ContainerManager::new(config.clone()).await?;
+            Arc::new(sandbox::DockerRuntime::new(Arc::new(container_manager)))
+        }
+        "firecracker" => {
+            info!("Using Firecracker runtime");
+            let vm_manager = firecracker::FirecrackerManager::new(config.clone()).await?;
+            Arc::new(sandbox::FirecrackerRuntime::new(Arc::new(vm_manager)))
+        }
+        _ => {
+            return Err(anyhow::anyhow!("Unknown runtime type: {}", config.sandbox.runtime.runtime_type));
+        }
+    };
+    
+    grpc_service.set_runtime(runtime).await;
     
     let grpc_handle = tokio::spawn(async move {
         info!("🚀 Starting gRPC server on {}", grpc_addr);
         
-        if let Err(e) = tonic::transport::Server::builder()
+        match tonic::transport::Server::builder()
             .add_service(grpc::service::soul_box_service_server::SoulBoxServiceServer::new(grpc_service))
             .serve(grpc_addr)
             .await
         {
-            error!("gRPC server error: {}", e);
+            Ok(_) => info!("gRPC server stopped gracefully"),
+            Err(e) => error!("gRPC server error: {}", e),
         }
     });
 
     info!("🦀 SoulBox is ready! REST API on port {}, gRPC on port {}", 
-          config.server.port, config.server.port + 1000);
+          config.server.port, grpc_port);
     info!("Press Ctrl+C to stop the server");
 
     // Wait for shutdown signal

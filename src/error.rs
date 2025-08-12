@@ -48,6 +48,15 @@ pub enum SoulBoxError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    #[error("Not found: {0}")]
+    NotFound(String),
+
+    #[error("Invalid state: {0}")]
+    InvalidState(String),
+
+    #[error("Unsupported operation: {0}")]
+    Unsupported(String),
 }
 
 impl SoulBoxError {
@@ -81,5 +90,17 @@ impl SoulBoxError {
 
     pub fn security(msg: impl Into<String>) -> Self {
         Self::Security(msg.into())
+    }
+
+    pub fn not_found(msg: impl Into<String>) -> Self {
+        Self::NotFound(msg.into())
+    }
+
+    pub fn invalid_state(msg: impl Into<String>) -> Self {
+        Self::InvalidState(msg.into())
+    }
+
+    pub fn unsupported(msg: impl Into<String>) -> Self {
+        Self::Unsupported(msg.into())
     }
 }

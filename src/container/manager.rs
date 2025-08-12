@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use bollard::Docker;
-use bollard::models::{ContainerConfig, HostConfig};
-use bollard::container::CreateContainerOptions;
-use tracing::{info, warn, error};
+use bollard::container::{Config as ContainerConfig, CreateContainerOptions};
+use bollard::models::HostConfig;
+use tracing::{info, error};
 
 use crate::{error::Result, config::Config};
 use super::{SandboxContainer, ResourceLimits, NetworkConfig};
@@ -81,12 +81,12 @@ impl ContainerManager {
             image: Some(image.to_string()),
             env: Some(docker_env),
             working_dir: Some("/workspace".to_string()),
-            host_config: Some(host_config),
             attach_stdout: Some(true),
             attach_stderr: Some(true),
             attach_stdin: Some(true),
             tty: Some(true),
             open_stdin: Some(true),
+            host_config: Some(host_config),
             ..Default::default()
         };
         

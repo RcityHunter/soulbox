@@ -4,8 +4,12 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_stream::{Stream, StreamExt};
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 use uuid::Uuid;
+
+use crate::container::{ResourceLimits, NetworkConfig};
+use crate::container::resource_limits::{MemoryLimits, CpuLimits, DiskLimits};
+use crate::sandbox::{SandboxRuntime, RuntimeType};
 
 // Import generated protobuf types
 mod soulbox_proto {
@@ -27,10 +31,11 @@ pub struct MockSandbox {
     pub endpoint_url: String,
 }
 
-#[derive(Debug)]
 pub struct SoulBoxServiceImpl {
     sandboxes: Arc<Mutex<HashMap<String, MockSandbox>>>,
     executions: Arc<Mutex<HashMap<String, String>>>, // execution_id -> sandbox_id
+    runtime: Arc<Mutex<Option<Arc<dyn SandboxRuntime>>>>,
+    sandbox_instances: Arc<Mutex<HashMap<String, Arc<dyn crate::sandbox::SandboxInstance>>>>,
 }
 
 impl Default for SoulBoxServiceImpl {
@@ -44,12 +49,14 @@ impl SoulBoxServiceImpl {
         Self {
             sandboxes: Arc::new(Mutex::new(HashMap::new())),
             executions: Arc::new(Mutex::new(HashMap::new())),
+            runtime: Arc::new(Mutex::new(None)),
+            sandbox_instances: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub async fn set_container_manager(&self, _manager: crate::container::ContainerManager) {
-        // TODO: Store container manager for actual container operations
-        // For now, this is just a placeholder for testing
+    pub async fn set_runtime(&self, runtime: Arc<dyn SandboxRuntime>) {
+        let mut runtime_lock = self.runtime.lock().await;
+        *runtime_lock = Some(runtime);
     }
 
     async fn create_mock_sandbox(&self, request: &CreateSandboxRequest) -> MockSandbox {
@@ -90,21 +97,104 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
             return Err(Status::invalid_argument("Template ID is required"));
         }
 
-        // Create mock sandbox
-        let sandbox = self.create_mock_sandbox(&req).await;
-        
-        // Store sandbox
-        let mut sandboxes = self.sandboxes.lock().await;
-        sandboxes.insert(sandbox.id.clone(), sandbox.clone());
+        // Get runtime
+        let runtime_lock = self.runtime.lock().await;
+        let runtime = runtime_lock.as_ref()
+            .ok_or_else(|| Status::internal("Runtime not initialized"))?;
 
-        let response = CreateSandboxResponse {
-            sandbox_id: sandbox.id,
-            status: sandbox.status,
-            created_at: sandbox.created_at,
-            endpoint_url: sandbox.endpoint_url,
+        // Generate sandbox ID
+        let sandbox_id = format!("sb_{}", Uuid::new_v4().to_string().replace("-", "")[..8].to_lowercase());
+        
+        // Template is used directly by runtime (Firecracker uses rootfs templates)
+
+        // Set resource limits with defaults or from config
+        let memory_limit = req.config.as_ref()
+            .and_then(|c| c.resource_limits.as_ref())
+            .map(|r| r.memory_mb)
+            .unwrap_or(512) as u64;
+            
+        let cpu_limit = req.config.as_ref()
+            .and_then(|c| c.resource_limits.as_ref())
+            .map(|r| r.cpu_cores)
+            .unwrap_or(1.0) as f64;
+
+        let resource_limits = ResourceLimits {
+            memory: MemoryLimits {
+                limit_mb: memory_limit,
+                swap_limit_mb: Some(memory_limit * 2),
+            },
+            cpu: CpuLimits {
+                cores: cpu_limit,
+                shares: Some(1024),
+            },
+            disk: DiskLimits {
+                limit_mb: 2048,
+                iops_limit: Some(1000),
+            },
         };
 
-        Ok(Response::new(response))
+        let network_config = NetworkConfig {
+            enable_internet: req.config.as_ref()
+                .and_then(|c| Some(c.enable_internet))
+                .unwrap_or(true),
+            port_mappings: vec![],
+            allowed_domains: req.config.as_ref()
+                .map(|c| c.allowed_domains.clone())
+                .unwrap_or_default(),
+            dns_servers: vec!["8.8.8.8".to_string(), "1.1.1.1".to_string()],
+        };
+
+        // Create sandbox using runtime
+        match runtime.create_sandbox(
+            &sandbox_id,
+            &req.template_id,
+            resource_limits,
+            network_config,
+            req.environment_variables.clone(),
+        ).await {
+            Ok(sandbox_instance) => {
+                // Start the sandbox
+                if let Err(e) = sandbox_instance.start().await {
+                    error!("Failed to start sandbox {}: {}", sandbox_id, e);
+                    return Err(Status::internal("Failed to start sandbox"));
+                }
+
+                // Create mock sandbox for tracking
+                let sandbox = self.create_mock_sandbox(&req).await;
+                
+                // Store sandbox with the actual ID
+                let mut sandbox_with_real_id = sandbox;
+                sandbox_with_real_id.id = sandbox_id.clone();
+                
+                let mut sandboxes = self.sandboxes.lock().await;
+                sandboxes.insert(sandbox_id.clone(), sandbox_with_real_id.clone());
+                drop(sandboxes);
+                
+                // Store sandbox instance
+                let mut instances = self.sandbox_instances.lock().await;
+                instances.insert(sandbox_id.clone(), sandbox_instance);
+
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap();
+                
+                let response = CreateSandboxResponse {
+                    sandbox_id,
+                    status: "running".to_string(),
+                    created_at: Some(prost_types::Timestamp {
+                        seconds: now.as_secs() as i64,
+                        nanos: now.subsec_nanos() as i32,
+                    }),
+                    endpoint_url: sandbox_with_real_id.endpoint_url,
+                };
+
+                Ok(Response::new(response))
+            }
+            Err(e) => {
+                error!("Failed to create sandbox: {}", e);
+                Err(Status::internal("Failed to create sandbox"))
+            }
+        }
     }
 
     async fn get_sandbox(
@@ -229,39 +319,55 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
         executions.insert(execution_id.clone(), req.sandbox_id.clone());
         drop(executions);
 
-        // Mock execution based on language and code
-        let (stdout, stderr, exit_code) = match req.language.as_str() {
-            "javascript" => {
-                if req.code.contains("console.log") {
-                    // Extract console.log messages
-                    let logs: Vec<&str> = req.code
-                        .split("console.log(")
-                        .skip(1)
-                        .map(|part| {
-                            let end = part.find(')').unwrap_or(part.len());
-                            &part[..end]
-                        })
-                        .collect();
-                    
-                    let output = logs.iter()
-                        .map(|log| log.trim_matches(['\'', '"']))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    
-                    (output, String::new(), 0)
-                } else {
-                    (String::new(), String::new(), 0)
-                }
+        // Get the sandbox instance
+        let instances = self.sandbox_instances.lock().await;
+        let instance = instances.get(&req.sandbox_id)
+            .ok_or_else(|| Status::not_found("Sandbox instance not found"))?
+            .clone();
+        drop(instances);
+
+        // Create execution command based on language
+        let command = match req.language.as_str() {
+            "javascript" | "node" => {
+                // Create a temporary file and execute with node
+                vec![
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    format!("echo '{}' > /tmp/code.js && node /tmp/code.js", req.code.replace("'", "'\\''")),
+                ]
             }
-            "python" => {
-                if req.code.contains("print") {
-                    ("Hello from Python".to_string(), String::new(), 0)
-                } else {
-                    (String::new(), String::new(), 0)
-                }
+            "python" | "python3" => {
+                vec![
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    format!("echo '{}' > /tmp/code.py && python /tmp/code.py", req.code.replace("'", "'\\''")),
+                ]
+            }
+            "rust" => {
+                vec![
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    format!("echo '{}' > /tmp/main.rs && rustc /tmp/main.rs -o /tmp/main && /tmp/main", req.code.replace("'", "'\\''")),
+                ]
+            }
+            "go" => {
+                vec![
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    format!("echo '{}' > /tmp/main.go && go run /tmp/main.go", req.code.replace("'", "'\\''")),
+                ]
             }
             _ => {
                 return Err(Status::invalid_argument("Unsupported language"));
+            }
+        };
+
+        // Execute the code in the sandbox
+        let (stdout, stderr, exit_code) = match instance.execute_command(command).await {
+            Ok((out, err, code)) => (out, err, code),
+            Err(e) => {
+                error!("Code execution failed: {}", e);
+                (String::new(), format!("Execution error: {}", e), 1)
             }
         };
 

@@ -63,10 +63,14 @@ futures = "0.3"
 prost-types = "0.12"
 
 # Container Runtime (Module 3)
-bollard = "0.19"
+bollard = "0.16"
 tempfile = "3.8"
 notify = "6.1"
 sysinfo = "0.31"
+
+# Firecracker VM support
+rand = "0.8"
+async-trait = "0.1"
 
 [build-dependencies]
 tonic-build = "0.10"
@@ -78,6 +82,10 @@ tokio-test = "0.4"
 [[bin]]
 name = "soulbox"
 path = "src/main.rs"
+
+[[bin]]
+name = "soulbox-agent"
+path = "src/bin/soulbox-agent.rs"
 
 [profile.release]
 opt-level = 3
