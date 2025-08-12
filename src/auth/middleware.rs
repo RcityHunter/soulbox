@@ -1,0 +1,335 @@
+use axum::{
+    extract::{Request, State},
+    http::{header::AUTHORIZATION, HeaderValue, StatusCode},
+    middleware::Next,
+    response::Response,
+};
+use std::sync::Arc;
+use tracing::{warn, debug};
+
+use super::{JwtManager, Claims};
+use super::models::{User, Permission, Role};
+use crate::error::SoulBoxError;
+
+/// 认证提取器 - 从请求中提取用户信息
+#[derive(Debug, Clone)]
+pub struct AuthContext {
+    pub user_id: uuid::Uuid,
+    pub username: String,
+    pub role: Role,
+    pub tenant_id: Option<uuid::Uuid>,
+    pub permissions: std::collections::HashSet<Permission>,
+}
+
+impl AuthContext {
+    pub fn from_claims(claims: Claims) -> Self {
+        let user_id = uuid::Uuid::parse_str(&claims.sub)
+            .expect("Invalid user ID in token claims");
+        
+        Self {
+            user_id,
+            username: claims.username,
+            role: claims.role.clone(),
+            tenant_id: claims.tenant_id,
+            permissions: claims.role.permissions(),
+        }
+    }
+
+    pub fn has_permission(&self, permission: &Permission) -> bool {
+        self.permissions.contains(permission)
+    }
+
+    pub fn can_access_tenant(&self, tenant_id: &uuid::Uuid) -> bool {
+        match self.role {
+            Role::SuperAdmin => true,
+            _ => self.tenant_id.as_ref() == Some(tenant_id),
+        }
+    }
+}
+
+/// 认证中间件
+pub struct AuthMiddleware {
+    jwt_manager: Arc<JwtManager>,
+    // TODO: 添加 API Key 管理器
+    // api_key_manager: Arc<ApiKeyManager>,
+}
+
+impl AuthMiddleware {
+    pub fn new(jwt_manager: Arc<JwtManager>) -> Self {
+        Self {
+            jwt_manager,
+        }
+    }
+
+    /// JWT 认证中间件
+    pub async fn jwt_auth(
+        State(auth_middleware): State<Arc<Self>>,
+        mut request: Request,
+        next: Next,
+    ) -> Result<Response, StatusCode> {
+        // 从 Authorization 头中提取令牌
+        let auth_header = request
+            .headers()
+            .get(AUTHORIZATION)
+            .and_then(|h| h.to_str().ok());
+
+        let token = match auth_header {
+            Some(header) if header.starts_with("Bearer ") => {
+                &header[7..] // 移除 "Bearer " 前缀
+            }
+            _ => {
+                warn!("Missing or invalid Authorization header");
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        };
+
+        // 验证 JWT 令牌
+        let claims = match auth_middleware.jwt_manager.validate_access_token(token) {
+            Ok(claims) => claims,
+            Err(e) => {
+                warn!("JWT validation failed: {}", e);
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        };
+
+        // 创建认证上下文并添加到请求扩展中
+        let auth_context = AuthContext::from_claims(claims);
+        request.extensions_mut().insert(auth_context);
+
+        debug!("User authenticated: {}", request.extensions().get::<AuthContext>().unwrap().username);
+        Ok(next.run(request).await)
+    }
+
+    /// API Key 认证中间件
+    pub async fn api_key_auth(
+        State(_auth_middleware): State<Arc<Self>>,
+        mut _request: Request,
+        next: Next,
+    ) -> Result<Response, StatusCode> {
+        // TODO: 实现 API Key 认证
+        // 1. 从头部或查询参数提取 API Key
+        // 2. 验证 API Key
+        // 3. 创建认证上下文
+        
+        // 暂时允许通过
+        Ok(next.run(_request).await)
+    }
+
+    /// 权限检查中间件工厂
+    pub fn require_permission(
+        permission: Permission,
+    ) -> impl Fn(Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, StatusCode>> + Send>> + Clone {
+        move |request: Request, next: Next| {
+            let required_permission = permission.clone();
+            Box::pin(async move {
+                // 从请求扩展中获取认证上下文
+                let auth_context = request
+                    .extensions()
+                    .get::<AuthContext>()
+                    .ok_or(StatusCode::UNAUTHORIZED)?;
+
+                // 检查权限
+                if !auth_context.has_permission(&required_permission) {
+                    warn!(
+                        "User {} lacks required permission {:?}",
+                        auth_context.username, required_permission
+                    );
+                    return Err(StatusCode::FORBIDDEN);
+                }
+
+                Ok(next.run(request).await)
+            })
+        }
+    }
+
+    /// 租户访问检查中间件工厂
+    pub fn require_tenant_access() -> impl Fn(Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, StatusCode>> + Send>> + Clone {
+        move |request: Request, next: Next| {
+            Box::pin(async move {
+                // 从请求扩展中获取认证上下文
+                let auth_context = request
+                    .extensions()
+                    .get::<AuthContext>()
+                    .ok_or(StatusCode::UNAUTHORIZED)?;
+
+                // TODO: 从请求路径或参数中提取租户 ID
+                // 暂时跳过租户检查
+                let _tenant_id = uuid::Uuid::new_v4(); // 示例租户 ID
+                
+                // 检查租户访问权限
+                // if !auth_context.can_access_tenant(&tenant_id) {
+                //     warn!(
+                //         "User {} cannot access tenant {}",
+                //         auth_context.username, tenant_id
+                //     );
+                //     return Err(StatusCode::FORBIDDEN);
+                // }
+
+                Ok(next.run(request).await)
+            })
+        }
+    }
+}
+
+/// 认证提取器 - 用于处理函数中提取认证信息
+pub struct AuthExtractor(pub AuthContext);
+
+#[axum::async_trait]
+impl<S> axum::extract::FromRequestParts<S> for AuthExtractor
+where
+    S: Send + Sync,
+{
+    type Rejection = StatusCode;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let auth_context = parts
+            .extensions
+            .get::<AuthContext>()
+            .ok_or(StatusCode::UNAUTHORIZED)?
+            .clone();
+
+        Ok(AuthExtractor(auth_context))
+    }
+}
+
+/// 可选认证提取器 - 认证信息可能不存在
+pub struct OptionalAuthExtractor(pub Option<AuthContext>);
+
+#[axum::async_trait]
+impl<S> axum::extract::FromRequestParts<S> for OptionalAuthExtractor
+where
+    S: Send + Sync,
+{
+    type Rejection = StatusCode;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let auth_context = parts.extensions.get::<AuthContext>().cloned();
+        Ok(OptionalAuthExtractor(auth_context))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::models::{User, Role};
+    use axum::{
+        body::Body,
+        http::{Method, Request, StatusCode},
+        middleware,
+        response::Response,
+        routing::get,
+        Router,
+    };
+    use tower::ServiceExt;
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    async fn test_handler(auth: AuthExtractor) -> &'static str {
+        format!("Hello, {}!", auth.0.username).leak()
+    }
+
+    fn create_test_user() -> User {
+        User {
+            id: Uuid::new_v4(),
+            username: "testuser".to_string(),
+            email: "test@example.com".to_string(),
+            role: Role::Developer,
+            is_active: true,
+            created_at: Utc::now(),
+            last_login: None,
+            tenant_id: Some(Uuid::new_v4()),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_jwt_auth_middleware_success() {
+        let jwt_manager = Arc::new(JwtManager::new(
+            "test-secret",
+            "soulbox".to_string(),
+            "soulbox-api".to_string(),
+        ));
+        
+        let auth_middleware = Arc::new(AuthMiddleware::new(jwt_manager.clone()));
+        
+        let app = Router::new()
+            .route("/test", get(test_handler))
+            .layer(middleware::from_fn_with_state(
+                auth_middleware,
+                AuthMiddleware::jwt_auth,
+            ));
+
+        let user = create_test_user();
+        let token = jwt_manager.generate_access_token(&user).unwrap();
+
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri("/test")
+            .header(AUTHORIZATION, format!("Bearer {}", token))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_jwt_auth_middleware_missing_token() {
+        let jwt_manager = Arc::new(JwtManager::new(
+            "test-secret",
+            "soulbox".to_string(),
+            "soulbox-api".to_string(),
+        ));
+        
+        let auth_middleware = Arc::new(AuthMiddleware::new(jwt_manager));
+        
+        let app = Router::new()
+            .route("/test", get(test_handler))
+            .layer(middleware::from_fn_with_state(
+                auth_middleware,
+                AuthMiddleware::jwt_auth,
+            ));
+
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri("/test")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_jwt_auth_middleware_invalid_token() {
+        let jwt_manager = Arc::new(JwtManager::new(
+            "test-secret",
+            "soulbox".to_string(),
+            "soulbox-api".to_string(),
+        ));
+        
+        let auth_middleware = Arc::new(AuthMiddleware::new(jwt_manager));
+        
+        let app = Router::new()
+            .route("/test", get(test_handler))
+            .layer(middleware::from_fn_with_state(
+                auth_middleware,
+                AuthMiddleware::jwt_auth,
+            ));
+
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri("/test")
+            .header(AUTHORIZATION, "Bearer invalid-token")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+}

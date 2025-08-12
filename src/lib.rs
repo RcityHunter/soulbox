@@ -12,6 +12,8 @@ pub mod sandbox;
 
 pub use config::Config;
 pub use error::{SoulBoxError, Result};
+pub use auth::{JwtManager, api_key::ApiKeyManager, middleware::AuthMiddleware};
+pub use api::auth::{AuthState, auth_routes};
 
 // Include generated protobuf code
 pub mod proto {

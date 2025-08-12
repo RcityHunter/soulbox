@@ -72,6 +72,11 @@ sysinfo = "0.31"
 rand = "0.8"
 async-trait = "0.1"
 
+# Authentication and security
+jsonwebtoken = "9.2"
+sha2 = "0.10"
+bcrypt = "0.15"
+
 [build-dependencies]
 tonic-build = "0.10"
 

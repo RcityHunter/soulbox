@@ -10,6 +10,10 @@ mod grpc;
 mod container;
 mod sandbox;
 mod firecracker;
+mod auth;
+mod api;
+mod websocket;
+mod filesystem;
 
 use config::Config;
 use server::Server;
