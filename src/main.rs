@@ -13,6 +13,7 @@ mod firecracker;
 mod auth;
 mod api;
 mod audit;
+mod database;
 mod websocket;
 mod filesystem;
 

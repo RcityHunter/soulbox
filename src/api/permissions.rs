@@ -261,6 +261,9 @@ async fn list_all_permissions(
             | Permission::ApiKeyList => "API Key",
             
             Permission::AuditRead | Permission::AuditList => "Audit",
+            
+            Permission::TemplateCreate | Permission::TemplateRead | Permission::TemplateUpdate 
+            | Permission::TemplateDelete | Permission::TemplateList => "Template",
         };
         
         permission_categories

@@ -10,6 +10,7 @@ pub mod auth;
 pub mod api;
 pub mod audit;
 pub mod sandbox;
+pub mod database;
 
 pub use config::Config;
 pub use error::{SoulBoxError, Result};

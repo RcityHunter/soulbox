@@ -27,6 +27,28 @@ pub struct DatabaseConfig {
     pub min_connections: u32,
 }
 
+impl From<DatabaseConfig> for crate::database::DatabaseConfig {
+    fn from(config: DatabaseConfig) -> Self {
+        let database_type = if config.url.starts_with("postgres://") || config.url.starts_with("postgresql://") {
+            crate::database::DatabaseType::Postgres
+        } else {
+            crate::database::DatabaseType::Sqlite
+        };
+        
+        crate::database::DatabaseConfig {
+            database_type,
+            url: config.url,
+            pool: crate::database::PoolConfig {
+                max_connections: config.max_connections,
+                min_connections: config.min_connections,
+                ..Default::default()
+            },
+            run_migrations: true,
+            reset_on_startup: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RedisConfig {
     pub url: String,

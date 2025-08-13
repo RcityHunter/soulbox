@@ -6,6 +6,7 @@ use crate::auth::middleware::{AuthMiddleware, AuthExtractor};
 use crate::auth::models::Permission;
 use crate::auth::{api_key::ApiKeyManager, JwtManager};
 use crate::config::Config;
+use crate::database::Database;
 use crate::error::Result as SoulBoxResult;
 use axum::{
     extract::State,
@@ -29,6 +30,7 @@ pub struct AppState {
     pub audit_state: AuditState,
     pub auth_middleware: Arc<AuthMiddleware>,
     pub audit_middleware: Arc<AuditMiddleware>,
+    pub database: Option<Arc<Database>>,
 }
 
 pub struct Server {
@@ -38,6 +40,25 @@ pub struct Server {
 
 impl Server {
     pub async fn new(config: Config) -> SoulBoxResult<Self> {
+        // 初始化数据库（如果配置了）
+        let database: Option<Arc<Database>> = if let Ok(_db_url) = std::env::var("DATABASE_URL") {
+            info!("Initializing database connection...");
+            let db_config = config.database.clone().into();
+            match Database::new(db_config).await {
+                Ok(db) => {
+                    info!("Database connected successfully");
+                    Some(Arc::new(db))
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to connect to database: {}. Running without persistence.", e);
+                    None
+                }
+            }
+        } else {
+            info!("No DATABASE_URL configured. Running without persistence.");
+            None
+        };
+
         // 创建认证管理器
         let jwt_secret = std::env::var("JWT_SECRET")
             .unwrap_or_else(|_| "demo-jwt-secret-change-in-production".to_string());
@@ -50,9 +71,13 @@ impl Server {
         
         let api_key_manager = Arc::new(ApiKeyManager::new("sk".to_string()));
         
-        // 创建审计服务
+        // 创建审计服务（带数据库支持）
         let audit_config = AuditConfig::default();
-        let audit_service = AuditService::new(audit_config)?;
+        let audit_service = if let Some(ref db) = database {
+            AuditService::with_database(audit_config, db.clone())?
+        } else {
+            AuditService::new(audit_config)?
+        };
         let audit_middleware = Arc::new(AuditMiddleware::new(audit_service.clone()));
         
         let auth_state = AuthState::new(jwt_manager, api_key_manager);
@@ -64,6 +89,7 @@ impl Server {
             audit_state: audit_state.clone(),
             auth_middleware: auth_state.auth_middleware.clone(),
             audit_middleware: audit_middleware.clone(),
+            database,
         };
 
         let app = create_app(app_state);

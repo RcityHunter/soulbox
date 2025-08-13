@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use std::collections::HashSet;
+use std::str::FromStr;
 use uuid::Uuid;
 
 /// 用户模型
@@ -46,6 +47,13 @@ pub enum Permission {
     FileDownload,
     FileDelete,
     FileList,
+    
+    // 模板管理权限
+    TemplateCreate,
+    TemplateRead,
+    TemplateUpdate,
+    TemplateDelete,
+    TemplateList,
     
     // 用户管理权限
     UserCreate,
@@ -117,6 +125,7 @@ impl Role {
                 vec![
                     Permission::SandboxCreate, Permission::SandboxRead, Permission::SandboxUpdate, Permission::SandboxDelete, Permission::SandboxExecute, Permission::SandboxList,
                     Permission::FileUpload, Permission::FileDownload, Permission::FileDelete, Permission::FileList,
+                    Permission::TemplateCreate, Permission::TemplateRead, Permission::TemplateUpdate, Permission::TemplateDelete, Permission::TemplateList,
                     Permission::UserCreate, Permission::UserRead, Permission::UserUpdate, Permission::UserDelete, Permission::UserList,
                     Permission::TenantCreate, Permission::TenantRead, Permission::TenantUpdate, Permission::TenantDelete,
                     Permission::SystemConfig, Permission::SystemMonitor, Permission::SystemLogs, Permission::SystemMaintenance,
@@ -129,6 +138,7 @@ impl Role {
                 vec![
                     Permission::SandboxCreate, Permission::SandboxRead, Permission::SandboxUpdate, Permission::SandboxDelete, Permission::SandboxExecute,
                     Permission::FileUpload, Permission::FileDownload, Permission::FileDelete, Permission::FileList,
+                    Permission::TemplateCreate, Permission::TemplateRead, Permission::TemplateUpdate, Permission::TemplateDelete, Permission::TemplateList,
                     Permission::UserCreate, Permission::UserRead, Permission::UserUpdate, Permission::UserDelete,
                     Permission::SystemMonitor, Permission::SystemLogs,
                     Permission::ApiKeyCreate, Permission::ApiKeyRevoke, Permission::ApiKeyList,
@@ -139,6 +149,7 @@ impl Role {
                 vec![
                     Permission::SandboxCreate, Permission::SandboxRead, Permission::SandboxUpdate, Permission::SandboxDelete, Permission::SandboxExecute,
                     Permission::FileUpload, Permission::FileDownload, Permission::FileDelete, Permission::FileList,
+                    Permission::TemplateRead, Permission::TemplateList,
                     Permission::ApiKeyCreate, Permission::ApiKeyRevoke, Permission::ApiKeyList,
                 ].into_iter().collect()
             }
@@ -147,6 +158,7 @@ impl Role {
                 vec![
                     Permission::SandboxCreate, Permission::SandboxRead, Permission::SandboxExecute,
                     Permission::FileUpload, Permission::FileDownload, Permission::FileList,
+                    Permission::TemplateRead, Permission::TemplateList,
                 ].into_iter().collect()
             }
             Role::ReadOnly => {
@@ -154,6 +166,7 @@ impl Role {
                 vec![
                     Permission::SandboxRead,
                     Permission::FileList,
+                    Permission::TemplateRead, Permission::TemplateList,
                 ].into_iter().collect()
             }
         }
@@ -246,5 +259,64 @@ impl Permission {
             Permission::AuditRead,
             Permission::AuditList,
         ].into_iter().collect()
+    }
+}
+
+// FromStr implementations for database conversions
+impl FromStr for Role {
+    type Err = String;
+    
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "SuperAdmin" => Ok(Role::SuperAdmin),
+            "TenantAdmin" => Ok(Role::TenantAdmin),
+            "Developer" => Ok(Role::Developer),
+            "User" => Ok(Role::User),
+            "ReadOnly" => Ok(Role::ReadOnly),
+            _ => Err(format!("Unknown Role: {}", s)),
+        }
+    }
+}
+
+impl FromStr for Permission {
+    type Err = String;
+    
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "SandboxCreate" => Ok(Permission::SandboxCreate),
+            "SandboxRead" => Ok(Permission::SandboxRead),
+            "SandboxExecute" => Ok(Permission::SandboxExecute),
+            "SandboxDelete" => Ok(Permission::SandboxDelete),
+            "SandboxList" => Ok(Permission::SandboxList),
+            "FileUpload" => Ok(Permission::FileUpload),
+            "FileDownload" => Ok(Permission::FileDownload),
+            "FileDelete" => Ok(Permission::FileDelete),
+            "FileList" => Ok(Permission::FileList),
+            "TemplateCreate" => Ok(Permission::TemplateCreate),
+            "TemplateRead" => Ok(Permission::TemplateRead),
+            "TemplateUpdate" => Ok(Permission::TemplateUpdate),
+            "TemplateDelete" => Ok(Permission::TemplateDelete),
+            "TemplateList" => Ok(Permission::TemplateList),
+            "UserCreate" => Ok(Permission::UserCreate),
+            "UserRead" => Ok(Permission::UserRead),
+            "UserUpdate" => Ok(Permission::UserUpdate),
+            "UserDelete" => Ok(Permission::UserDelete),
+            "UserList" => Ok(Permission::UserList),
+            "TenantCreate" => Ok(Permission::TenantCreate),
+            "TenantRead" => Ok(Permission::TenantRead),
+            "TenantUpdate" => Ok(Permission::TenantUpdate),
+            "TenantDelete" => Ok(Permission::TenantDelete),
+            "SystemConfig" => Ok(Permission::SystemConfig),
+            "SystemMonitor" => Ok(Permission::SystemMonitor),
+            "SystemLogs" => Ok(Permission::SystemLogs),
+            "SystemMaintenance" => Ok(Permission::SystemMaintenance),
+            "ApiKeyCreate" => Ok(Permission::ApiKeyCreate),
+            "ApiKeyRead" => Ok(Permission::ApiKeyRead),
+            "ApiKeyRevoke" => Ok(Permission::ApiKeyRevoke),
+            "ApiKeyList" => Ok(Permission::ApiKeyList),
+            "AuditRead" => Ok(Permission::AuditRead),
+            "AuditList" => Ok(Permission::AuditList),
+            _ => Err(format!("Unknown Permission: {}", s)),
+        }
     }
 }

@@ -5,6 +5,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::audit::models::{AuditLog, AuditQuery, AuditStats, AuditEventType, AuditSeverity, AuditResult};
 use crate::error::{Result as SoulBoxResult, SoulBoxError};
+use crate::database::{Database, repositories::AuditRepository};
 
 /// 审计日志服务配置
 #[derive(Debug, Clone)]
@@ -19,6 +20,8 @@ pub struct AuditConfig {
     pub enable_detailed_logging: bool,
     /// 日志轮转大小（条数）
     pub log_rotation_size: usize,
+    /// 是否启用数据库持久化
+    pub enable_persistence: bool,
 }
 
 impl Default for AuditConfig {
@@ -29,6 +32,7 @@ impl Default for AuditConfig {
             enable_security_alerts: true,
             enable_detailed_logging: true,
             log_rotation_size: 50000,
+            enable_persistence: true,
         }
     }
 }
@@ -197,11 +201,11 @@ impl AuditStorage {
 }
 
 /// 审计日志服务
-#[derive(Debug)]
 pub struct AuditService {
     storage: Arc<RwLock<AuditStorage>>,
     config: AuditConfig,
     sender: mpsc::UnboundedSender<AuditLog>,
+    repository: Option<Arc<AuditRepository>>,
 }
 
 impl AuditService {
@@ -214,16 +218,42 @@ impl AuditService {
             storage: storage.clone(),
             config: config.clone(),
             sender,
+            repository: None,
         });
 
         // 启动异步日志处理任务
         let storage_clone = storage.clone();
         let config_clone = config.clone();
         tokio::spawn(async move {
-            Self::log_processing_task(receiver, storage_clone, config_clone).await;
+            Self::log_processing_task(receiver, storage_clone, config_clone, None).await;
         });
 
         info!("审计日志服务启动成功，配置: {:?}", config);
+        Ok(service)
+    }
+    
+    /// 创建带数据库支持的审计服务
+    pub fn with_database(config: AuditConfig, database: Arc<Database>) -> SoulBoxResult<Arc<Self>> {
+        let storage = Arc::new(RwLock::new(AuditStorage::new(config.max_memory_logs)));
+        let (sender, receiver) = mpsc::unbounded_channel();
+        let repository = Arc::new(AuditRepository::new(database));
+
+        let service = Arc::new(Self {
+            storage: storage.clone(),
+            config: config.clone(),
+            sender,
+            repository: Some(repository.clone()),
+        });
+
+        // 启动异步日志处理任务
+        let storage_clone = storage.clone();
+        let config_clone = config.clone();
+        let repo_clone = Some(repository);
+        tokio::spawn(async move {
+            Self::log_processing_task(receiver, storage_clone, config_clone, repo_clone).await;
+        });
+
+        info!("审计日志服务启动成功（带数据库支持），配置: {:?}", config);
         Ok(service)
     }
 
@@ -255,7 +285,26 @@ impl AuditService {
     }
 
     /// 查询审计日志
-    pub fn query(&self, query: AuditQuery) -> SoulBoxResult<Vec<AuditLog>> {
+    pub async fn query(&self, query: AuditQuery) -> SoulBoxResult<Vec<AuditLog>> {
+        // 如果有数据库支持且启用持久化，从数据库查询
+        if self.config.enable_persistence {
+            if let Some(ref repo) = self.repository {
+                let db_logs = repo.query(query.clone()).await
+                    .map_err(|e| SoulBoxError::Internal(format!("Database query failed: {}", e)))?;
+                
+                // 转换数据库模型到领域模型
+                let mut logs = Vec::new();
+                for db_log in db_logs {
+                    match db_log.to_domain_model() {
+                        Ok(log) => logs.push(log),
+                        Err(e) => error!("Failed to convert audit log: {}", e),
+                    }
+                }
+                return Ok(logs);
+            }
+        }
+        
+        // 否则从内存查询
         let storage = self.storage.read().map_err(|e| {
             SoulBoxError::Internal(format!("Failed to acquire read lock: {}", e))
         })?;
@@ -295,6 +344,7 @@ impl AuditService {
         mut receiver: mpsc::UnboundedReceiver<AuditLog>,
         storage: Arc<RwLock<AuditStorage>>,
         config: AuditConfig,
+        repository: Option<Arc<AuditRepository>>,
     ) {
         info!("审计日志处理任务启动");
 
@@ -303,12 +353,21 @@ impl AuditService {
                 debug!("处理审计日志: {:?}", log);
             }
 
-            // 写入存储
+            // 写入内存存储
             if let Ok(mut storage) = storage.write() {
                 storage.add_log(log.clone());
             } else {
                 error!("无法获取存储写锁，跳过日志: {}", log.message);
                 continue;
+            }
+
+            // 写入数据库（如果启用持久化）
+            if config.enable_persistence {
+                if let Some(ref repo) = repository {
+                    if let Err(e) = repo.create(&log).await {
+                        error!("写入审计日志到数据库失败: {}", e);
+                    }
+                }
             }
 
             // 处理高严重程度事件
@@ -319,7 +378,6 @@ impl AuditService {
             // TODO: 未来可在此处添加：
             // - 发送到外部日志系统 (ELK, Splunk)
             // - 发送告警通知
-            // - 写入数据库
             // - 触发自动化响应
         }
 

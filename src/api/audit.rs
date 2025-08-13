@@ -150,7 +150,7 @@ async fn list_audit_logs(
     }
 
     // 查询审计日志
-    let logs = audit_state.audit_service.query(query).map_err(|e| {
+    let logs = audit_state.audit_service.query(query).await.map_err(|e| {
         warn!("Failed to query audit logs: {}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
@@ -229,7 +229,7 @@ async fn get_user_audit_logs(
     }
 
     // 查询审计日志
-    let logs = audit_state.audit_service.query(query).map_err(|e| {
+    let logs = audit_state.audit_service.query(query).await.map_err(|e| {
         warn!("Failed to query user audit logs: {}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
@@ -264,7 +264,7 @@ async fn list_security_events(
     }
 
     // 查询所有日志并过滤安全事件
-    let all_logs = audit_state.audit_service.query(query).map_err(|e| {
+    let all_logs = audit_state.audit_service.query(query).await.map_err(|e| {
         warn!("Failed to query audit logs: {}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;

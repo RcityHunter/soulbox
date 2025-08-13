@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::auth::models::{Permission, Role};
@@ -44,6 +45,11 @@ pub enum AuditEventType {
     SecurityViolation,
     SuspiciousActivity,
     UnauthorizedAccess,
+    
+    // 数据操作事件
+    DataExported,
+    DataImported,
+    BackupCreated,
 }
 
 /// 审计事件严重程度
@@ -243,7 +249,7 @@ impl AuditLog {
 }
 
 /// 审计查询参数
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct AuditQuery {
     pub event_type: Option<AuditEventType>,
     pub severity: Option<AuditSeverity>,
@@ -370,5 +376,70 @@ mod tests {
 
         assert!(!normal_log.is_security_event());
         assert!(!normal_log.is_high_severity());
+    }
+}
+
+// FromStr implementations for database conversions
+impl FromStr for AuditEventType {
+    type Err = String;
+    
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "UserLogin" => Ok(AuditEventType::UserLogin),
+            "UserLogout" => Ok(AuditEventType::UserLogout),
+            "UserLoginFailed" => Ok(AuditEventType::UserLoginFailed),
+            "TokenRefresh" => Ok(AuditEventType::TokenRefresh),
+            "ApiKeyCreated" => Ok(AuditEventType::ApiKeyCreated),
+            "ApiKeyRevoked" => Ok(AuditEventType::ApiKeyRevoked),
+            "PermissionGranted" => Ok(AuditEventType::PermissionGranted),
+            "PermissionDenied" => Ok(AuditEventType::PermissionDenied),
+            "RoleAssigned" => Ok(AuditEventType::RoleAssigned),
+            "RoleRevoked" => Ok(AuditEventType::RoleRevoked),
+            "SandboxCreated" => Ok(AuditEventType::SandboxCreated),
+            "SandboxStarted" => Ok(AuditEventType::SandboxStarted),
+            "SandboxStopped" => Ok(AuditEventType::SandboxStopped),
+            "SandboxDeleted" => Ok(AuditEventType::SandboxDeleted),
+            "SandboxExecuted" => Ok(AuditEventType::SandboxExecuted),
+            "FileUploaded" => Ok(AuditEventType::FileUploaded),
+            "FileDownloaded" => Ok(AuditEventType::FileDownloaded),
+            "FileDeleted" => Ok(AuditEventType::FileDeleted),
+            "SystemConfigChanged" => Ok(AuditEventType::SystemConfigChanged),
+            "MaintenanceStarted" => Ok(AuditEventType::MaintenanceStarted),
+            "MaintenanceCompleted" => Ok(AuditEventType::MaintenanceCompleted),
+            "SecurityViolation" => Ok(AuditEventType::SecurityViolation),
+            "SuspiciousActivity" => Ok(AuditEventType::SuspiciousActivity),
+            "UnauthorizedAccess" => Ok(AuditEventType::UnauthorizedAccess),
+            "DataExported" => Ok(AuditEventType::DataExported),
+            "DataImported" => Ok(AuditEventType::DataImported),
+            "BackupCreated" => Ok(AuditEventType::BackupCreated),
+            _ => Err(format!("Unknown AuditEventType: {}", s)),
+        }
+    }
+}
+
+impl FromStr for AuditSeverity {
+    type Err = String;
+    
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Info" => Ok(AuditSeverity::Info),
+            "Warning" => Ok(AuditSeverity::Warning),
+            "Error" => Ok(AuditSeverity::Error),
+            "Critical" => Ok(AuditSeverity::Critical),
+            _ => Err(format!("Unknown AuditSeverity: {}", s)),
+        }
+    }
+}
+
+impl FromStr for AuditResult {
+    type Err = String;
+    
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Success" => Ok(AuditResult::Success),
+            "Failure" => Ok(AuditResult::Failure),
+            "Pending" => Ok(AuditResult::Pending),
+            _ => Err(format!("Unknown AuditResult: {}", s)),
+        }
     }
 }
