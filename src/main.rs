@@ -12,6 +12,7 @@ mod sandbox;
 mod firecracker;
 mod auth;
 mod api;
+mod audit;
 mod websocket;
 mod filesystem;
 

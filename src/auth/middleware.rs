@@ -9,6 +9,7 @@ use tracing::{warn, debug};
 
 use super::{JwtManager, Claims};
 use super::models::{User, Permission, Role};
+use crate::audit::{AuditService, AuditMiddleware, AuditEventType};
 use crate::error::SoulBoxError;
 
 /// 认证提取器 - 从请求中提取用户信息
@@ -50,6 +51,7 @@ impl AuthContext {
 /// 认证中间件
 pub struct AuthMiddleware {
     jwt_manager: Arc<JwtManager>,
+    audit_middleware: Option<Arc<AuditMiddleware>>,
     // TODO: 添加 API Key 管理器
     // api_key_manager: Arc<ApiKeyManager>,
 }
@@ -58,7 +60,13 @@ impl AuthMiddleware {
     pub fn new(jwt_manager: Arc<JwtManager>) -> Self {
         Self {
             jwt_manager,
+            audit_middleware: None,
         }
+    }
+
+    pub fn with_audit(mut self, audit_middleware: Arc<AuditMiddleware>) -> Self {
+        self.audit_middleware = Some(audit_middleware);
+        self
     }
 
     /// JWT 认证中间件
@@ -85,8 +93,55 @@ impl AuthMiddleware {
 
         // 验证 JWT 令牌
         let claims = match auth_middleware.jwt_manager.validate_access_token(token) {
-            Ok(claims) => claims,
+            Ok(claims) => {
+                // 记录成功的认证事件
+                if let Some(ref audit_middleware) = auth_middleware.audit_middleware {
+                    let user_id = uuid::Uuid::parse_str(&claims.sub).ok();
+                    let ip_address = request.headers()
+                        .get("x-forwarded-for")
+                        .or_else(|| request.headers().get("x-real-ip"))
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    let user_agent = request.headers()
+                        .get("user-agent")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+
+                    let _ = audit_middleware.log_auth_event(
+                        AuditEventType::UserLogin,
+                        user_id,
+                        Some(claims.username.clone()),
+                        true,
+                        None,
+                        ip_address,
+                        user_agent,
+                    ).await;
+                }
+                claims
+            }
             Err(e) => {
+                // 记录失败的认证事件
+                if let Some(ref audit_middleware) = auth_middleware.audit_middleware {
+                    let ip_address = request.headers()
+                        .get("x-forwarded-for")
+                        .or_else(|| request.headers().get("x-real-ip"))
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    let user_agent = request.headers()
+                        .get("user-agent")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+
+                    let _ = audit_middleware.log_auth_event(
+                        AuditEventType::UserLoginFailed,
+                        None,
+                        None,
+                        false,
+                        Some(e.to_string()),
+                        ip_address,
+                        user_agent,
+                    ).await;
+                }
                 warn!("JWT validation failed: {}", e);
                 return Err(StatusCode::UNAUTHORIZED);
             }

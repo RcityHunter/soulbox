@@ -1,5 +1,7 @@
 use crate::api::auth::{auth_routes, AuthState};
+use crate::api::audit::{audit_routes, AuditState};
 use crate::api::permissions::permission_routes;
+use crate::audit::{AuditConfig, AuditMiddleware, AuditService};
 use crate::auth::middleware::{AuthMiddleware, AuthExtractor};
 use crate::auth::models::Permission;
 use crate::auth::{api_key::ApiKeyManager, JwtManager};
@@ -24,7 +26,9 @@ use tracing::info;
 pub struct AppState {
     pub config: Config,
     pub auth_state: AuthState,
+    pub audit_state: AuditState,
     pub auth_middleware: Arc<AuthMiddleware>,
+    pub audit_middleware: Arc<AuditMiddleware>,
 }
 
 pub struct Server {
@@ -46,12 +50,20 @@ impl Server {
         
         let api_key_manager = Arc::new(ApiKeyManager::new("sk".to_string()));
         
+        // 创建审计服务
+        let audit_config = AuditConfig::default();
+        let audit_service = AuditService::new(audit_config)?;
+        let audit_middleware = Arc::new(AuditMiddleware::new(audit_service.clone()));
+        
         let auth_state = AuthState::new(jwt_manager, api_key_manager);
+        let audit_state = AuditState::new(audit_service);
 
         let app_state = AppState {
             config: config.clone(),
             auth_state: auth_state.clone(),
+            audit_state: audit_state.clone(),
             auth_middleware: auth_state.auth_middleware.clone(),
+            audit_middleware: audit_middleware.clone(),
         };
 
         let app = create_app(app_state);
@@ -78,6 +90,9 @@ fn create_app(state: AppState) -> Router {
     
     // 创建权限管理路由
     let permission_router = permission_routes(state.auth_state.clone());
+    
+    // 创建审计日志路由
+    let audit_router = audit_routes(state.audit_state.clone());
 
     // 创建需要认证的路由 - 沙盒管理
     let sandbox_routes = Router::new()
@@ -114,6 +129,8 @@ fn create_app(state: AppState) -> Router {
         .nest("/api/v1", auth_router)
         // 权限管理路由
         .nest("/api/v1", permission_router)
+        // 审计日志路由
+        .nest("/api/v1", audit_router)
         // 沙盒管理路由
         .merge(sandbox_routes)
         // 全局中间件
