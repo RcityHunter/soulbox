@@ -95,15 +95,18 @@ impl From<&User> for UserInfo {
 pub struct AuthState {
     pub jwt_manager: Arc<JwtManager>,
     pub api_key_manager: Arc<ApiKeyManager>,
+    pub auth_middleware: Arc<AuthMiddleware>,
     // TODO: 添加用户数据存储
     // pub user_repository: Arc<UserRepository>,
 }
 
 impl AuthState {
     pub fn new(jwt_manager: Arc<JwtManager>, api_key_manager: Arc<ApiKeyManager>) -> Self {
+        let auth_middleware = Arc::new(AuthMiddleware::new(jwt_manager.clone()));
         Self {
             jwt_manager,
             api_key_manager,
+            auth_middleware,
         }
     }
 }
