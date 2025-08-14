@@ -5,7 +5,8 @@ use tracing::{debug, error, info, warn};
 
 use crate::audit::models::{AuditLog, AuditQuery, AuditStats, AuditEventType, AuditSeverity, AuditResult};
 use crate::error::{Result as SoulBoxResult, SoulBoxError};
-use crate::database::{Database, repositories::AuditRepository};
+use crate::database::Database;
+// Temporarily disabled: repositories::AuditRepository
 
 /// 审计日志服务配置
 #[derive(Debug, Clone)]
@@ -205,7 +206,7 @@ pub struct AuditService {
     storage: Arc<RwLock<AuditStorage>>,
     config: AuditConfig,
     sender: mpsc::UnboundedSender<AuditLog>,
-    repository: Option<Arc<AuditRepository>>,
+    // Temporarily disabled: repository: Option<Arc<AuditRepository>>,
 }
 
 impl AuditService {
@@ -218,14 +219,14 @@ impl AuditService {
             storage: storage.clone(),
             config: config.clone(),
             sender,
-            repository: None,
+            // Temporarily disabled: repository field
         });
 
         // 启动异步日志处理任务
         let storage_clone = storage.clone();
         let config_clone = config.clone();
         tokio::spawn(async move {
-            Self::log_processing_task(receiver, storage_clone, config_clone, None).await;
+            Self::log_processing_task(receiver, storage_clone, config_clone).await;
         });
 
         info!("审计日志服务启动成功，配置: {:?}", config);
@@ -236,21 +237,22 @@ impl AuditService {
     pub fn with_database(config: AuditConfig, database: Arc<Database>) -> SoulBoxResult<Arc<Self>> {
         let storage = Arc::new(RwLock::new(AuditStorage::new(config.max_memory_logs)));
         let (sender, receiver) = mpsc::unbounded_channel();
-        let repository = Arc::new(AuditRepository::new(database));
+        // Temporarily disabled: let repository = Arc::new(AuditRepository::new(database));
 
         let service = Arc::new(Self {
             storage: storage.clone(),
             config: config.clone(),
             sender,
-            repository: Some(repository.clone()),
+            // Temporarily disabled: repository: Some(repository.clone()),
         });
 
         // 启动异步日志处理任务
         let storage_clone = storage.clone();
         let config_clone = config.clone();
-        let repo_clone = Some(repository);
+        // Temporarily disabled: let repo_clone = Some(repository);
+        // let repo_clone: Option<Arc<AuditRepository>> = None;
         tokio::spawn(async move {
-            Self::log_processing_task(receiver, storage_clone, config_clone, repo_clone).await;
+            Self::log_processing_task(receiver, storage_clone, config_clone).await;
         });
 
         info!("审计日志服务启动成功（带数据库支持），配置: {:?}", config);
@@ -286,22 +288,9 @@ impl AuditService {
 
     /// 查询审计日志
     pub async fn query(&self, query: AuditQuery) -> SoulBoxResult<Vec<AuditLog>> {
-        // 如果有数据库支持且启用持久化，从数据库查询
+        // Temporarily disabled: database query functionality
         if self.config.enable_persistence {
-            if let Some(ref repo) = self.repository {
-                let db_logs = repo.query(query.clone()).await
-                    .map_err(|e| SoulBoxError::Internal(format!("Database query failed: {}", e)))?;
-                
-                // 转换数据库模型到领域模型
-                let mut logs = Vec::new();
-                for db_log in db_logs {
-                    match db_log.to_domain_model() {
-                        Ok(log) => logs.push(log),
-                        Err(e) => error!("Failed to convert audit log: {}", e),
-                    }
-                }
-                return Ok(logs);
-            }
+            debug!("Database persistence is temporarily disabled");
         }
         
         // 否则从内存查询
@@ -344,7 +333,7 @@ impl AuditService {
         mut receiver: mpsc::UnboundedReceiver<AuditLog>,
         storage: Arc<RwLock<AuditStorage>>,
         config: AuditConfig,
-        repository: Option<Arc<AuditRepository>>,
+        // Temporarily disabled: repository: Option<Arc<AuditRepository>>,
     ) {
         info!("审计日志处理任务启动");
 
@@ -363,11 +352,13 @@ impl AuditService {
 
             // 写入数据库（如果启用持久化）
             if config.enable_persistence {
-                if let Some(ref repo) = repository {
-                    if let Err(e) = repo.create(&log).await {
-                        error!("写入审计日志到数据库失败: {}", e);
-                    }
-                }
+                // Temporarily disabled: repository functionality
+                // if let Some(ref repo) = repository {
+                //     if let Err(e) = repo.create(&log).await {
+                //         error!("写入审计日志到数据库失败: {}", e);
+                //     }
+                // }
+                debug!("Persistence is disabled in current build");
             }
 
             // 处理高严重程度事件

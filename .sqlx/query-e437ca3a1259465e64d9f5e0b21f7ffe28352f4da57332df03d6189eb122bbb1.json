@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                    INSERT INTO sandboxes (\n                        id, name, runtime_type, template, status, owner_id, tenant_id,\n                        cpu_limit, memory_limit, disk_limit,\n                        container_id, vm_id, ip_address, port_mappings,\n                        created_at, updated_at, expires_at\n                    ) VALUES (\n                        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17\n                    )\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 17
+    },
+    "nullable": []
+  },
+  "hash": "e437ca3a1259465e64d9f5e0b21f7ffe28352f4da57332df03d6189eb122bbb1"
+}

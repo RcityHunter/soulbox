@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                    UPDATE sandboxes \n                    SET container_id = ?2, vm_id = ?3, ip_address = ?4, \n                        started_at = datetime('now'), updated_at = datetime('now')\n                    WHERE id = ?1\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "946c078f32829ddcee9b086339b03c2d31e625d8306bee231656413ac6f64f4c"
+}

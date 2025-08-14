@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                    UPDATE templates \n                    SET name = ?2, slug = ?3, description = ?4, runtime_type = ?5,\n                        base_image = ?6, default_command = ?7, environment_vars = ?8,\n                        resource_limits = ?9, is_public = ?10, updated_at = datetime('now')\n                    WHERE id = ?1\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "db40703c680e8f905e83cc019b4b90d40882f32b66174650b2677caf7554a234"
+}

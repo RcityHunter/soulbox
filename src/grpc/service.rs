@@ -7,9 +7,9 @@ use tonic::{Request, Response, Status, Streaming};
 use tracing::{info, warn, error};
 use uuid::Uuid;
 
-use crate::container::{ResourceLimits, NetworkConfig};
+use crate::container::{ResourceLimits as ContainerResourceLimits, NetworkConfig as ContainerNetworkConfig};
 use crate::container::resource_limits::{MemoryLimits, CpuLimits, DiskLimits};
-use crate::sandbox::{SandboxRuntime, RuntimeType};
+use crate::sandbox::SandboxRuntime;
 
 // Import generated protobuf types
 mod soulbox_proto {
@@ -118,7 +118,7 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
             .map(|r| r.cpu_cores)
             .unwrap_or(1.0) as f64;
 
-        let resource_limits = ResourceLimits {
+        let resource_limits = ContainerResourceLimits {
             memory: MemoryLimits {
                 limit_mb: memory_limit,
                 swap_limit_mb: Some(memory_limit * 2),
@@ -133,7 +133,7 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
             },
         };
 
-        let network_config = NetworkConfig {
+        let network_config = ContainerNetworkConfig {
             enable_internet: req.config.as_ref()
                 .and_then(|c| Some(c.enable_internet))
                 .unwrap_or(true),

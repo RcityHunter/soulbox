@@ -1,0 +1,128 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT * FROM sandboxes WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "runtime_type",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "template",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "status",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "owner_id",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "tenant_id",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "cpu_limit",
+        "ordinal": 7,
+        "type_info": "Int64"
+      },
+      {
+        "name": "memory_limit",
+        "ordinal": 8,
+        "type_info": "Int64"
+      },
+      {
+        "name": "disk_limit",
+        "ordinal": 9,
+        "type_info": "Int64"
+      },
+      {
+        "name": "container_id",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "vm_id",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "ip_address",
+        "ordinal": 12,
+        "type_info": "Text"
+      },
+      {
+        "name": "port_mappings",
+        "ordinal": 13,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 14,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 15,
+        "type_info": "Text"
+      },
+      {
+        "name": "started_at",
+        "ordinal": 16,
+        "type_info": "Text"
+      },
+      {
+        "name": "stopped_at",
+        "ordinal": 17,
+        "type_info": "Text"
+      },
+      {
+        "name": "expires_at",
+        "ordinal": 18,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "d6dd0a7b59c022ca203331121b6c6ad9c283985eb0a9a1ed68af374454a7530f"
+}

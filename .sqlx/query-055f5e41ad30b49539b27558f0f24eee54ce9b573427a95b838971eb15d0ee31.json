@@ -1,0 +1,92 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                        SELECT * FROM templates \n                        WHERE is_public = 1\n                        ORDER BY created_at DESC \n                        LIMIT ?1 OFFSET ?2\n                        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "slug",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "description",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "runtime_type",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "base_image",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "default_command",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "environment_vars",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "resource_limits",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_public",
+        "ordinal": 9,
+        "type_info": "Int64"
+      },
+      {
+        "name": "owner_id",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 12,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "055f5e41ad30b49539b27558f0f24eee54ce9b573427a95b838971eb15d0ee31"
+}

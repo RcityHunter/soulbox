@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE sandboxes SET status = ?2, updated_at = datetime('now') WHERE id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "1505c2052d903f54b4f71b0109ea267276694209512665dfbbf48de174ae53b0"
+}

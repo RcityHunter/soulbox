@@ -1,7 +1,8 @@
 pub mod config;
 pub mod connection;
 pub mod models;
-pub mod repositories;
+// Temporarily disabled due to SQLx macro compilation issues with mixed PostgreSQL/SQLite code
+// pub mod repositories;
 pub mod migrations;
 
 pub use config::{DatabaseConfig, DatabaseType, PoolConfig};

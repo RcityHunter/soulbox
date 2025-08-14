@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                    INSERT INTO templates (\n                        id, name, slug, description, runtime_type, base_image,\n                        default_command, environment_vars, resource_limits,\n                        is_public, owner_id, created_at, updated_at\n                    ) VALUES (\n                        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13\n                    )\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 13
+    },
+    "nullable": []
+  },
+  "hash": "24e74592811f3d34b03d43ef781c48d95d21f74050cd1ca5b33dc46cf704693a"
+}

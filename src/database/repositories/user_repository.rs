@@ -215,11 +215,11 @@ impl UserRepository {
     pub async fn update_password(&self, user_id: Uuid, password_hash: &str) -> DatabaseResult<()> {
         match &*self.db.pool() {
             DatabasePool::Postgres(pool) => {
-                let result = sqlx::query!(
-                    "UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1",
-                    user_id,
-                    password_hash
+                let result = sqlx::query(
+                    "UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1"
                 )
+                .bind(user_id)
+                .bind(password_hash)
                 .execute(pool)
                 .await?;
                 
@@ -250,10 +250,10 @@ impl UserRepository {
     pub async fn update_last_login(&self, user_id: Uuid) -> DatabaseResult<()> {
         match &*self.db.pool() {
             DatabasePool::Postgres(pool) => {
-                sqlx::query!(
-                    "UPDATE users SET last_login = NOW() WHERE id = $1",
-                    user_id
+                sqlx::query(
+                    "UPDATE users SET last_login = NOW() WHERE id = $1"
                 )
+                .bind(user_id)
                 .execute(pool)
                 .await?;
             }

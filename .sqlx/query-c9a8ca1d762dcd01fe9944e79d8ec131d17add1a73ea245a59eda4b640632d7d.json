@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM sandboxes WHERE expires_at < datetime('now') AND status != 'stopped'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "c9a8ca1d762dcd01fe9944e79d8ec131d17add1a73ea245a59eda4b640632d7d"
+}
