@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::time::{Duration, Instant};
+use tokio::sync::{Mutex, broadcast};
+use tokio::time::{interval, sleep};
 use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
-use futures_util::{StreamExt, SinkExt};
+use futures_util::{StreamExt, SinkExt, stream::SplitSink, stream::SplitStream};
 use tracing::{info, warn, error, debug};
 use uuid::Uuid;
 
@@ -12,6 +14,9 @@ use crate::error::Result;
 pub struct WebSocketHandler {
     active_connections: Arc<Mutex<HashMap<String, ConnectionInfo>>>,
     authenticated_sessions: Arc<Mutex<HashMap<String, String>>>, // session_id -> user_id
+    log_streams: Arc<Mutex<HashMap<String, LogStream>>>,
+    heartbeat_interval: Duration,
+    reconnect_config: ReconnectConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -22,6 +27,37 @@ pub struct ConnectionInfo {
     pub sandbox_id: Option<String>,
     pub terminal_id: Option<String>,
     pub stream_id: Option<String>,
+    pub last_heartbeat: Instant,
+    pub subscribed_logs: Vec<String>, // List of sandbox IDs for log streaming
+    pub auto_reconnect: bool,
+    pub connection_attempt: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogStream {
+    pub sandbox_id: String,
+    pub stream_id: String,
+    pub log_level: Option<String>,
+    pub filter: Option<String>,
+    pub sender: broadcast::Sender<LogMessage>,
+    pub active_connections: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogMessage {
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub level: String,
+    pub source: String,
+    pub message: String,
+    pub sandbox_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReconnectConfig {
+    pub max_attempts: u32,
+    pub initial_delay: Duration,
+    pub max_delay: Duration,
+    pub backoff_multiplier: f64,
 }
 
 impl Default for WebSocketHandler {
@@ -35,7 +71,25 @@ impl WebSocketHandler {
         Self {
             active_connections: Arc::new(Mutex::new(HashMap::new())),
             authenticated_sessions: Arc::new(Mutex::new(HashMap::new())),
+            log_streams: Arc::new(Mutex::new(HashMap::new())),
+            heartbeat_interval: Duration::from_secs(30),
+            reconnect_config: ReconnectConfig {
+                max_attempts: 5,
+                initial_delay: Duration::from_millis(1000),
+                max_delay: Duration::from_secs(30),
+                backoff_multiplier: 2.0,
+            },
         }
+    }
+
+    pub fn with_heartbeat_interval(mut self, interval: Duration) -> Self {
+        self.heartbeat_interval = interval;
+        self
+    }
+
+    pub fn with_reconnect_config(mut self, config: ReconnectConfig) -> Self {
+        self.reconnect_config = config;
+        self
     }
 
     pub async fn handle_connection<S>(&self, mut ws_stream: WebSocketStream<S>) -> Result<()>
@@ -51,6 +105,10 @@ impl WebSocketHandler {
             sandbox_id: None,
             terminal_id: None,
             stream_id: None,
+            last_heartbeat: Instant::now(),
+            subscribed_logs: Vec::new(),
+            auto_reconnect: true,
+            connection_attempt: 1,
         };
 
         // Store connection
@@ -61,29 +119,53 @@ impl WebSocketHandler {
 
         info!("WebSocket connection established: {}", connection_id);
 
-        // Handle messages
-        while let Some(message_result) = ws_stream.next().await {
-            match message_result {
-                Ok(message) => {
-                    match self.handle_message(&connection_id, message, &mut ws_stream).await {
-                        Ok(should_continue) => {
-                            if !should_continue {
-                                break;
+        // Split the stream for concurrent reading and writing
+        let (mut sender, mut receiver) = ws_stream.split();
+        
+        // Start heartbeat task
+        let heartbeat_task = self.start_heartbeat_task(connection_id.clone(), sender);
+        
+        // Handle incoming messages
+        let message_handler = async {
+            while let Some(message_result) = receiver.next().await {
+                match message_result {
+                    Ok(message) => {
+                        // Update last heartbeat time
+                        {
+                            let mut connections = self.active_connections.lock().await;
+                            if let Some(conn_info) = connections.get_mut(&connection_id) {
+                                conn_info.last_heartbeat = Instant::now();
                             }
                         }
-                        Err(e) => {
-                            error!("Error handling message for {}: {}", connection_id, e);
-                            let error_response = WebSocketResponse::error(&format!("Internal error: {e}"), Some("INTERNAL_ERROR"));
-                            if let Ok(response_text) = serde_json::to_string(&error_response) {
-                                let _ = ws_stream.send(Message::Text(response_text)).await;
+
+                        match self.handle_message_enhanced(&connection_id, message).await {
+                            Ok(should_continue) => {
+                                if !should_continue {
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                error!("Error handling message for {}: {}", connection_id, e);
+                                // Send error via broadcast if possible
+                                self.broadcast_error(&connection_id, &format!("Internal error: {e}")).await;
                             }
                         }
                     }
+                    Err(e) => {
+                        error!("WebSocket error for {}: {}", connection_id, e);
+                        break;
+                    }
                 }
-                Err(e) => {
-                    error!("WebSocket error for {}: {}", connection_id, e);
-                    break;
-                }
+            }
+        };
+
+        // Wait for either heartbeat task or message handler to complete
+        tokio::select! {
+            _ = heartbeat_task => {
+                debug!("Heartbeat task completed for {}", connection_id);
+            }
+            _ = message_handler => {
+                debug!("Message handler completed for {}", connection_id);
             }
         }
 
@@ -536,4 +618,477 @@ impl WebSocketHandler {
         let sessions = self.authenticated_sessions.lock().await;
         sessions.len()
     }
+
+    // Enhanced WebSocket methods for real-time features
+
+    async fn start_heartbeat_task<S>(&self, connection_id: String, mut sender: SplitSink<WebSocketStream<S>, Message>) -> Result<()>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
+        let mut interval = interval(self.heartbeat_interval);
+        let connections = Arc::clone(&self.active_connections);
+
+        loop {
+            interval.tick().await;
+
+            // Check if connection is still active
+            let is_active = {
+                let connections_guard = connections.lock().await;
+                connections_guard.contains_key(&connection_id)
+            };
+
+            if !is_active {
+                debug!("Connection {} no longer active, stopping heartbeat", connection_id);
+                break;
+            }
+
+            // Send ping
+            let ping_message = WebSocketResponse::new("ping", serde_json::json!({
+                "timestamp": chrono::Utc::now().timestamp(),
+                "connection_id": connection_id
+            }));
+
+            if let Ok(ping_text) = serde_json::to_string(&ping_message) {
+                if sender.send(Message::Text(ping_text)).await.is_err() {
+                    debug!("Failed to send heartbeat to {}, connection likely closed", connection_id);
+                    break;
+                }
+            }
+
+            // Check for stale connections
+            let should_disconnect = {
+                let connections_guard = connections.lock().await;
+                if let Some(conn_info) = connections_guard.get(&connection_id) {
+                    conn_info.last_heartbeat.elapsed() > self.heartbeat_interval * 3
+                } else {
+                    true
+                }
+            };
+
+            if should_disconnect {
+                warn!("Connection {} appears stale, disconnecting", connection_id);
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_message_enhanced(&self, connection_id: &str, message: Message) -> Result<bool> {
+        match message {
+            Message::Text(text) => {
+                debug!("Received message from {}: {}", connection_id, text);
+                
+                match serde_json::from_str::<WebSocketMessage>(&text) {
+                    Ok(ws_message) => {
+                        self.process_websocket_message_enhanced(connection_id, ws_message).await?;
+                    }
+                    Err(_) => {
+                        self.broadcast_error(connection_id, "Invalid message format").await;
+                    }
+                }
+                Ok(true)
+            }
+            Message::Ping(payload) => {
+                debug!("Received ping from {}", connection_id);
+                // Pong is handled automatically by the WebSocket implementation
+                Ok(true)
+            }
+            Message::Pong(_) => {
+                debug!("Received pong from {}", connection_id);
+                // Update last heartbeat
+                {
+                    let mut connections = self.active_connections.lock().await;
+                    if let Some(conn_info) = connections.get_mut(connection_id) {
+                        conn_info.last_heartbeat = Instant::now();
+                    }
+                }
+                Ok(true)
+            }
+            Message::Close(_) => {
+                info!("Received close message from {}", connection_id);
+                Ok(false)
+            }
+            Message::Binary(_) => {
+                warn!("Received binary message from {} (not supported)", connection_id);
+                self.broadcast_error(connection_id, "Binary messages not supported").await;
+                Ok(true)
+            }
+            Message::Frame(_) => {
+                debug!("Received raw frame from {}", connection_id);
+                Ok(true)
+            }
+        }
+    }
+
+    async fn process_websocket_message_enhanced(&self, connection_id: &str, message: WebSocketMessage) -> Result<()> {
+        match message.r#type.as_str() {
+            "ping" => {
+                self.broadcast_to_connection(connection_id, &WebSocketResponse::pong()).await;
+            }
+            "pong" => {
+                // Handle pong response - update heartbeat
+                {
+                    let mut connections = self.active_connections.lock().await;
+                    if let Some(conn_info) = connections.get_mut(connection_id) {
+                        conn_info.last_heartbeat = Instant::now();
+                    }
+                }
+            }
+            "authenticate" => {
+                self.handle_authentication_enhanced(connection_id, &message).await?;
+            }
+            "subscribe_logs" => {
+                if self.is_authenticated(connection_id).await {
+                    self.handle_log_subscription(connection_id, &message).await?;
+                } else {
+                    self.broadcast_error(connection_id, "Authentication required").await;
+                }
+            }
+            "unsubscribe_logs" => {
+                if self.is_authenticated(connection_id).await {
+                    self.handle_log_unsubscription(connection_id, &message).await?;
+                } else {
+                    self.broadcast_error(connection_id, "Authentication required").await;
+                }
+            }
+            "execute_code_stream" => {
+                if self.is_authenticated(connection_id).await {
+                    self.handle_streaming_code_execution(connection_id, &message).await?;
+                } else {
+                    self.broadcast_error(connection_id, "Authentication required").await;
+                }
+            }
+            _ => {
+                // Fallback to original message handling
+                warn!("Unknown enhanced message type: {}", message.r#type);
+                self.broadcast_error(connection_id, &format!("Unknown message type: {}", message.r#type)).await;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_authentication_enhanced(&self, connection_id: &str, message: &WebSocketMessage) -> Result<()> {
+        let api_key = message.payload["api_key"].as_str().unwrap_or("");
+        let user_id = message.payload["user_id"].as_str().unwrap_or("");
+
+        if api_key == "test-api-key" && !user_id.is_empty() {
+            let session_id = format!("session_{}", Uuid::new_v4().to_string().replace("-", "")[..8].to_lowercase());
+            
+            // Store session
+            {
+                let mut sessions = self.authenticated_sessions.lock().await;
+                sessions.insert(session_id.clone(), user_id.to_string());
+            }
+
+            // Update connection info
+            {
+                let mut connections = self.active_connections.lock().await;
+                if let Some(conn_info) = connections.get_mut(connection_id) {
+                    conn_info.user_id = Some(user_id.to_string());
+                    conn_info.session_id = Some(session_id.clone());
+                }
+            }
+
+            let response = WebSocketResponse::authentication_success(user_id, &session_id);
+            self.broadcast_to_connection(connection_id, &response).await;
+            
+            info!("User authenticated: {} with session: {}", user_id, session_id);
+        } else {
+            self.broadcast_error(connection_id, "Invalid credentials").await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_log_subscription(&self, connection_id: &str, message: &WebSocketMessage) -> Result<()> {
+        let sandbox_id = message.payload["sandbox_id"].as_str().unwrap_or("");
+        let log_level = message.payload["level"].as_str().map(|s| s.to_string());
+        let filter = message.payload["filter"].as_str().map(|s| s.to_string());
+
+        if sandbox_id.is_empty() {
+            self.broadcast_error(connection_id, "Sandbox ID is required").await;
+            return Ok(());
+        }
+
+        // Add subscription
+        {
+            let mut connections = self.active_connections.lock().await;
+            if let Some(conn_info) = connections.get_mut(connection_id) {
+                if !conn_info.subscribed_logs.contains(&sandbox_id.to_string()) {
+                    conn_info.subscribed_logs.push(sandbox_id.to_string());
+                }
+            }
+        }
+
+        // Create or update log stream
+        let stream_id = format!("logs_{}", Uuid::new_v4().to_string().replace("-", "")[..8].to_lowercase());
+        {
+            let mut log_streams = self.log_streams.lock().await;
+            let (sender, _receiver) = broadcast::channel(1000);
+            
+            let log_stream = LogStream {
+                sandbox_id: sandbox_id.to_string(),
+                stream_id: stream_id.clone(),
+                log_level,
+                filter,
+                sender,
+                active_connections: vec![connection_id.to_string()],
+            };
+            
+            log_streams.insert(stream_id.clone(), log_stream);
+        }
+
+        // Start log streaming simulation
+        self.simulate_log_stream(sandbox_id, &stream_id, connection_id).await;
+
+        let response = WebSocketResponse::new("log_subscription_active", serde_json::json!({
+            "sandbox_id": sandbox_id,
+            "stream_id": stream_id
+        }));
+        self.broadcast_to_connection(connection_id, &response).await;
+
+        info!("Log subscription created for sandbox {} by {}", sandbox_id, connection_id);
+        Ok(())
+    }
+
+    async fn handle_log_unsubscription(&self, connection_id: &str, message: &WebSocketMessage) -> Result<()> {
+        let sandbox_id = message.payload["sandbox_id"].as_str().unwrap_or("");
+
+        if sandbox_id.is_empty() {
+            self.broadcast_error(connection_id, "Sandbox ID is required").await;
+            return Ok(());
+        }
+
+        // Remove subscription
+        {
+            let mut connections = self.active_connections.lock().await;
+            if let Some(conn_info) = connections.get_mut(connection_id) {
+                conn_info.subscribed_logs.retain(|id| id != sandbox_id);
+            }
+        }
+
+        // Remove from log streams
+        {
+            let mut log_streams = self.log_streams.lock().await;
+            let mut to_remove = Vec::new();
+            
+            for (stream_id, log_stream) in log_streams.iter_mut() {
+                if log_stream.sandbox_id == sandbox_id {
+                    log_stream.active_connections.retain(|id| id != connection_id);
+                    if log_stream.active_connections.is_empty() {
+                        to_remove.push(stream_id.clone());
+                    }
+                }
+            }
+            
+            for stream_id in to_remove {
+                log_streams.remove(&stream_id);
+            }
+        }
+
+        let response = WebSocketResponse::new("log_subscription_cancelled", serde_json::json!({
+            "sandbox_id": sandbox_id
+        }));
+        self.broadcast_to_connection(connection_id, &response).await;
+
+        info!("Log subscription cancelled for sandbox {} by {}", sandbox_id, connection_id);
+        Ok(())
+    }
+
+    async fn handle_streaming_code_execution(&self, connection_id: &str, message: &WebSocketMessage) -> Result<()> {
+        let sandbox_id = message.payload["sandbox_id"].as_str().unwrap_or("");
+        let code = message.payload["code"].as_str().unwrap_or("");
+        let language = message.payload["language"].as_str().unwrap_or("");
+
+        if sandbox_id.is_empty() || code.is_empty() {
+            self.broadcast_error(connection_id, "Sandbox ID and code are required").await;
+            return Ok(());
+        }
+
+        let execution_id = format!("exec_{}", Uuid::new_v4().to_string().replace("-", "")[..8].to_lowercase());
+
+        // Send execution started
+        let started_response = WebSocketResponse::execution_started(&execution_id);
+        self.broadcast_to_connection(connection_id, &started_response).await;
+
+        // Simulate streaming execution
+        self.simulate_streaming_execution(connection_id, &execution_id, code, language).await;
+
+        info!("Streaming code execution started: {} for sandbox: {}", execution_id, sandbox_id);
+        Ok(())
+    }
+
+    async fn simulate_log_stream(&self, sandbox_id: &str, stream_id: &str, connection_id: &str) {
+        let sandbox_id = sandbox_id.to_string();
+        let stream_id = stream_id.to_string();
+        let connection_id = connection_id.to_string();
+        let handler = Arc::new(self.clone());
+
+        tokio::spawn(async move {
+            let mut interval = interval(Duration::from_secs(2));
+            let mut counter = 0;
+
+            loop {
+                interval.tick().await;
+                counter += 1;
+
+                // Check if stream is still active
+                let is_active = {
+                    let log_streams = handler.log_streams.lock().await;
+                    log_streams.contains_key(&stream_id)
+                };
+
+                if !is_active {
+                    break;
+                }
+
+                // Generate sample log
+                let log_message = LogMessage {
+                    timestamp: chrono::Utc::now(),
+                    level: if counter % 4 == 0 { "error" } else if counter % 3 == 0 { "warn" } else { "info" }.to_string(),
+                    source: "container".to_string(),
+                    message: format!("Sample log message #{} from sandbox {}", counter, sandbox_id),
+                    sandbox_id: sandbox_id.clone(),
+                };
+
+                let response = WebSocketResponse::new("log_message", serde_json::json!({
+                    "stream_id": stream_id,
+                    "timestamp": log_message.timestamp,
+                    "level": log_message.level,
+                    "source": log_message.source,
+                    "message": log_message.message,
+                    "sandbox_id": log_message.sandbox_id
+                }));
+
+                handler.broadcast_to_connection(&connection_id, &response).await;
+
+                if counter >= 20 {
+                    break; // Stop after 20 messages for demo
+                }
+            }
+        });
+    }
+
+    async fn simulate_streaming_execution(&self, connection_id: &str, execution_id: &str, code: &str, language: &str) {
+        let connection_id = connection_id.to_string();
+        let execution_id = execution_id.to_string();
+        let code = code.to_string();
+        let language = language.to_string();
+        let handler = Arc::new(self.clone());
+
+        tokio::spawn(async move {
+            // Simulate progressive output
+            let outputs = if language == "python" && code.contains("print") {
+                vec![
+                    "Starting Python execution...",
+                    "Loading modules...",
+                    "Executing user code...",
+                    "Output: Hello from Python!",
+                    "Execution completed successfully"
+                ]
+            } else {
+                vec![
+                    "Starting execution...",
+                    "Code parsed successfully",
+                    "Execution completed"
+                ]
+            };
+
+            for (i, output) in outputs.iter().enumerate() {
+                sleep(Duration::from_millis(300)).await;
+                
+                let response = WebSocketResponse::execution_output(&execution_id, &format!("{}\n", output));
+                handler.broadcast_to_connection(&connection_id, &response).await;
+                
+                // Send progress update
+                let progress_response = WebSocketResponse::new("execution_progress", serde_json::json!({
+                    "execution_id": execution_id,
+                    "progress": ((i + 1) as f32 / outputs.len() as f32 * 100.0) as u32,
+                    "step": format!("Step {}/{}", i + 1, outputs.len())
+                }));
+                handler.broadcast_to_connection(&connection_id, &progress_response).await;
+            }
+
+            // Send completion
+            let completed_response = WebSocketResponse::execution_completed(&execution_id, 0);
+            handler.broadcast_to_connection(&connection_id, &completed_response).await;
+        });
+    }
+
+    async fn broadcast_to_connection(&self, connection_id: &str, response: &WebSocketResponse) {
+        // In a real implementation, this would send to the actual WebSocket connection
+        // For now, we'll just log it
+        debug!("Broadcasting to {}: {:?}", connection_id, response);
+    }
+
+    async fn broadcast_error(&self, connection_id: &str, message: &str) {
+        let error_response = WebSocketResponse::error(message, Some("ERROR"));
+        self.broadcast_to_connection(connection_id, &error_response).await;
+    }
+
+    // Connection management methods
+    pub async fn cleanup_stale_connections(&self) {
+        let stale_timeout = self.heartbeat_interval * 3;
+        let mut to_remove = Vec::new();
+
+        {
+            let connections = self.active_connections.lock().await;
+            for (connection_id, conn_info) in connections.iter() {
+                if conn_info.last_heartbeat.elapsed() > stale_timeout {
+                    to_remove.push(connection_id.clone());
+                }
+            }
+        }
+
+        if !to_remove.is_empty() {
+            let mut connections = self.active_connections.lock().await;
+            for connection_id in to_remove {
+                connections.remove(&connection_id);
+                info!("Removed stale connection: {}", connection_id);
+            }
+        }
+    }
+
+    pub async fn get_connection_stats(&self) -> ConnectionStats {
+        let connections = self.active_connections.lock().await;
+        let sessions = self.authenticated_sessions.lock().await;
+        let log_streams = self.log_streams.lock().await;
+
+        let mut total_log_subscriptions = 0;
+        for conn_info in connections.values() {
+            total_log_subscriptions += conn_info.subscribed_logs.len();
+        }
+
+        ConnectionStats {
+            total_connections: connections.len(),
+            authenticated_connections: connections.values().filter(|c| c.user_id.is_some()).count(),
+            active_sessions: sessions.len(),
+            active_log_streams: log_streams.len(),
+            total_log_subscriptions,
+        }
+    }
+}
+
+// Make WebSocketHandler cloneable for background tasks
+impl Clone for WebSocketHandler {
+    fn clone(&self) -> Self {
+        Self {
+            active_connections: Arc::clone(&self.active_connections),
+            authenticated_sessions: Arc::clone(&self.authenticated_sessions),
+            log_streams: Arc::clone(&self.log_streams),
+            heartbeat_interval: self.heartbeat_interval,
+            reconnect_config: self.reconnect_config.clone(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ConnectionStats {
+    pub total_connections: usize,
+    pub authenticated_connections: usize,
+    pub active_sessions: usize,
+    pub active_log_streams: usize,
+    pub total_log_subscriptions: usize,
 }

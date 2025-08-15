@@ -63,13 +63,19 @@ tokio-stream = "0.1"
 futures = "0.3"
 prost-types = "0.12"
 
+# CLI dependencies
+clap = { version = "4.4", features = ["derive", "color", "suggestions"] }
+colored = "2.0"
+indicatif = "0.17"
+dirs = "5.0"
+
 # Container Runtime (Module 3)
 bollard = "0.16"
 tempfile = "3.8"
 notify = "6.1"
 sysinfo = "0.31"
 
-# Firecracker VM support
+# Firecracker VM support and utilities
 rand = "0.8"
 async-trait = "0.1"
 
@@ -98,6 +104,10 @@ path = "src/main.rs"
 [[bin]]
 name = "soulbox-agent"
 path = "src/bin/soulbox-agent.rs"
+
+[[bin]]
+name = "soulbox-cli"
+path = "src/bin/soulbox-cli.rs"
 
 [profile.release]
 opt-level = 3

@@ -1,12 +1,12 @@
 pub mod config;
 pub mod connection;
 pub mod models;
-// TODO: Temporarily disabled - restore after fixing SQLite compatibility issues
-// pub mod repositories;
+pub mod repositories;
 pub mod migrations;
 
 pub use config::{DatabaseConfig, DatabaseType, PoolConfig};
 pub use connection::{Database, DatabasePool};
+pub use repositories::*;
 
 /// 数据库错误类型
 #[derive(Debug, thiserror::Error)]

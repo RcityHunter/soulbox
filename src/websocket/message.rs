@@ -122,6 +122,92 @@ pub struct ErrorResponse {
     pub code: Option<String>,
 }
 
+// Enhanced Real-time Messages
+
+// Log Streaming Messages
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogSubscriptionRequest {
+    pub sandbox_id: String,
+    pub level: Option<String>,
+    pub filter: Option<String>,
+    pub buffer_size: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogSubscriptionResponse {
+    pub sandbox_id: String,
+    pub stream_id: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogMessage {
+    pub stream_id: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub level: String,
+    pub source: String,
+    pub message: String,
+    pub sandbox_id: String,
+}
+
+// Streaming Code Execution Messages
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamingExecuteRequest {
+    pub sandbox_id: String,
+    pub code: String,
+    pub language: String,
+    pub timeout: Option<u64>,
+    pub stream_output: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionProgress {
+    pub execution_id: String,
+    pub progress: u32, // 0-100
+    pub step: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamingExecutionOutput {
+    pub execution_id: String,
+    pub output_type: String, // "stdout", "stderr", "system"
+    pub data: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+// Heartbeat Messages
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeartbeatPing {
+    pub connection_id: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub server_time: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeartbeatPong {
+    pub connection_id: String,
+    pub client_time: i64,
+    pub server_time: i64,
+}
+
+// Connection Management Messages
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionStats {
+    pub connection_id: String,
+    pub uptime: String,
+    pub message_count: u64,
+    pub last_activity: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReconnectInfo {
+    pub attempt: u32,
+    pub delay_ms: u64,
+    pub max_attempts: u32,
+    pub next_attempt_at: chrono::DateTime<chrono::Utc>,
+}
+
 impl WebSocketMessage {
     pub fn new(message_type: &str, payload: serde_json::Value) -> Self {
         Self {
@@ -177,6 +263,43 @@ impl WebSocketMessage {
         Self::new("authenticate", serde_json::json!({
             "api_key": api_key,
             "user_id": user_id
+        }))
+    }
+
+    // Enhanced message constructors
+    pub fn subscribe_logs(sandbox_id: &str, level: Option<&str>, filter: Option<&str>) -> Self {
+        let mut payload = serde_json::json!({
+            "sandbox_id": sandbox_id
+        });
+        if let Some(level) = level {
+            payload["level"] = serde_json::Value::String(level.to_string());
+        }
+        if let Some(filter) = filter {
+            payload["filter"] = serde_json::Value::String(filter.to_string());
+        }
+        Self::new("subscribe_logs", payload)
+    }
+
+    pub fn unsubscribe_logs(sandbox_id: &str) -> Self {
+        Self::new("unsubscribe_logs", serde_json::json!({
+            "sandbox_id": sandbox_id
+        }))
+    }
+
+    pub fn execute_code_stream(sandbox_id: &str, code: &str, language: &str) -> Self {
+        Self::new("execute_code_stream", serde_json::json!({
+            "sandbox_id": sandbox_id,
+            "code": code,
+            "language": language,
+            "stream_output": true
+        }))
+    }
+
+    pub fn heartbeat_pong(connection_id: &str, client_time: i64) -> Self {
+        Self::new("pong", serde_json::json!({
+            "connection_id": connection_id,
+            "client_time": client_time,
+            "server_time": chrono::Utc::now().timestamp()
         }))
     }
 }
@@ -258,5 +381,61 @@ impl WebSocketResponse {
             payload["code"] = serde_json::Value::String(code.to_string());
         }
         Self::new("error", payload)
+    }
+
+    // Enhanced response constructors
+    pub fn log_message(stream_id: &str, timestamp: chrono::DateTime<chrono::Utc>, level: &str, source: &str, message: &str, sandbox_id: &str) -> Self {
+        Self::new("log_message", serde_json::json!({
+            "stream_id": stream_id,
+            "timestamp": timestamp,
+            "level": level,
+            "source": source,
+            "message": message,
+            "sandbox_id": sandbox_id
+        }))
+    }
+
+    pub fn execution_progress(execution_id: &str, progress: u32, step: &str) -> Self {
+        Self::new("execution_progress", serde_json::json!({
+            "execution_id": execution_id,
+            "progress": progress,
+            "step": step,
+            "timestamp": chrono::Utc::now()
+        }))
+    }
+
+    pub fn streaming_output(execution_id: &str, output_type: &str, data: &str) -> Self {
+        Self::new("streaming_output", serde_json::json!({
+            "execution_id": execution_id,
+            "output_type": output_type,
+            "data": data,
+            "timestamp": chrono::Utc::now()
+        }))
+    }
+
+    pub fn heartbeat_ping(connection_id: &str) -> Self {
+        Self::new("ping", serde_json::json!({
+            "connection_id": connection_id,
+            "timestamp": chrono::Utc::now(),
+            "server_time": chrono::Utc::now().timestamp()
+        }))
+    }
+
+    pub fn connection_stats(connection_id: &str, uptime: &str, message_count: u64) -> Self {
+        Self::new("connection_stats", serde_json::json!({
+            "connection_id": connection_id,
+            "uptime": uptime,
+            "message_count": message_count,
+            "last_activity": chrono::Utc::now()
+        }))
+    }
+
+    pub fn reconnect_info(attempt: u32, delay_ms: u64, max_attempts: u32) -> Self {
+        Self::new("reconnect_info", serde_json::json!({
+            "attempt": attempt,
+            "delay_ms": delay_ms,
+            "max_attempts": max_attempts,
+            "next_attempt_at": chrono::Utc::now() + chrono::Duration::milliseconds(delay_ms as i64)
+        }))
     }
 }
