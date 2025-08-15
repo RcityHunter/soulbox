@@ -12,6 +12,9 @@ pub mod audit;
 pub mod sandbox;
 pub mod database;
 
+// Simple implementation - Linus style
+pub mod simple;
+
 pub use config::Config;
 pub use error::{SoulBoxError, Result};
 pub use auth::{JwtManager, api_key::ApiKeyManager, middleware::AuthMiddleware};

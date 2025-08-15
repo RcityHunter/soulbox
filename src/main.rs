@@ -76,8 +76,15 @@ async fn main() -> Result<()> {
     let grpc_handle = tokio::spawn(async move {
         info!("🚀 Starting gRPC server on {}", grpc_addr);
         
+        // Build reflection service
+        let reflection_service = tonic_reflection::server::Builder::configure()
+            .register_encoded_file_descriptor_set(grpc::FILE_DESCRIPTOR_SET)
+            .build()
+            .unwrap();
+        
         match tonic::transport::Server::builder()
             .add_service(grpc::service::soul_box_service_server::SoulBoxServiceServer::new(grpc_service))
+            .add_service(reflection_service)
             .serve(grpc_addr)
             .await
         {

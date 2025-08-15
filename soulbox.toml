@@ -13,7 +13,7 @@ workers = 4
 max_connections = 1000
 
 [database]
-url = "postgresql://soulbox:password@localhost:5432/soulbox"
+url = "sqlite:soulbox.db"
 max_connections = 20
 min_connections = 5
 
@@ -43,7 +43,18 @@ build_timeout_seconds = 600
 registry_url = "ghcr.io/yourusername/soulbox-templates"
 
 [runtime]
+# Runtime configuration
+default = "docker"  # "docker" or "firecracker"
+
+# Firecracker VM configuration (when using firecracker runtime)
+[runtime.firecracker]
+kernel_path = "/opt/firecracker/vmlinux"
+rootfs_path = "/opt/firecracker/rootfs"
+# Download kernel from: https://github.com/firecracker-microvm/firecracker/releases
+# Example rootfs setup: https://github.com/firecracker-microvm/firecracker/blob/main/docs/rootfs-and-kernel-setup.md
+
 # Multi-runtime version support
+[runtime.versions]
 python = "3.11.6"
 nodejs = "20.9.0"
 bun = "1.0.0"

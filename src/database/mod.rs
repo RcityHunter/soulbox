@@ -1,7 +1,7 @@
 pub mod config;
 pub mod connection;
 pub mod models;
-// Temporarily disabled due to SQLx macro compilation issues with mixed PostgreSQL/SQLite code
+// TODO: Temporarily disabled - restore after fixing SQLite compatibility issues
 // pub mod repositories;
 pub mod migrations;
 

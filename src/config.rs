@@ -113,7 +113,7 @@ impl Default for Config {
                 max_memory_mb: 1024,
                 max_cpu_cores: 2.0,
                 runtime: RuntimeConfig {
-                    runtime_type: "firecracker".to_string(), // Default to Firecracker
+                    runtime_type: "docker".to_string(), // Default to Docker
                     firecracker_kernel_path: Some("/opt/firecracker/vmlinux".to_string()),
                     firecracker_rootfs_path: Some("/opt/firecracker/rootfs".to_string()),
                 },
