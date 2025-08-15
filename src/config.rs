@@ -127,36 +127,179 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Load configuration from environment variables
+    /// Load configuration from environment variables with comprehensive validation
     pub async fn from_env() -> Result<Self> {
         dotenvy::dotenv().ok(); // Load .env file if present
 
         let mut config = Self::default();
+        let mut validation_errors = Vec::new();
 
-        // Server configuration
+        // Server configuration with validation
         if let Ok(host) = std::env::var("SERVER_HOST") {
-            config.server.host = host;
+            if Self::validate_host(&host) {
+                config.server.host = host;
+            } else {
+                validation_errors.push("SERVER_HOST contains invalid characters".to_string());
+            }
         }
-        if let Ok(port) = std::env::var("SERVER_PORT") {
-            config.server.port = port.parse().unwrap_or(8080);
+        
+        if let Ok(port_str) = std::env::var("SERVER_PORT") {
+            match port_str.parse::<u16>() {
+                Ok(port) if port > 0 && port != 22 && port != 80 && port != 443 => {
+                    config.server.port = port;
+                }
+                Ok(port) => {
+                    validation_errors.push(format!("SERVER_PORT {} is reserved or invalid", port));
+                }
+                Err(_) => {
+                    validation_errors.push(format!("SERVER_PORT '{}' is not a valid port number", port_str));
+                }
+            }
+        }
+        
+        if let Ok(workers_str) = std::env::var("SERVER_WORKERS") {
+            match workers_str.parse::<usize>() {
+                Ok(workers) if workers > 0 && workers <= 256 => {
+                    config.server.workers = workers;
+                }
+                Ok(workers) => {
+                    validation_errors.push(format!("SERVER_WORKERS {} is out of valid range (1-256)", workers));
+                }
+                Err(_) => {
+                    validation_errors.push(format!("SERVER_WORKERS '{}' is not a valid number", workers_str));
+                }
+            }
         }
 
-        // Database configuration
+        // Database configuration with validation
         if let Ok(url) = std::env::var("DATABASE_URL") {
-            config.database.url = url;
+            if Self::validate_database_url(&url) {
+                config.database.url = url;
+            } else {
+                validation_errors.push("DATABASE_URL format is invalid".to_string());
+            }
+        }
+        
+        if let Ok(max_conn_str) = std::env::var("DATABASE_MAX_CONNECTIONS") {
+            match max_conn_str.parse::<u32>() {
+                Ok(max_conn) if max_conn > 0 && max_conn <= 1000 => {
+                    config.database.max_connections = max_conn;
+                }
+                Ok(max_conn) => {
+                    validation_errors.push(format!("DATABASE_MAX_CONNECTIONS {} is out of valid range (1-1000)", max_conn));
+                }
+                Err(_) => {
+                    validation_errors.push(format!("DATABASE_MAX_CONNECTIONS '{}' is not a valid number", max_conn_str));
+                }
+            }
         }
 
-        // Redis configuration
+        // Redis configuration with validation
         if let Ok(url) = std::env::var("REDIS_URL") {
-            config.redis.url = url;
+            if Self::validate_redis_url(&url) {
+                config.redis.url = url;
+            } else {
+                validation_errors.push("REDIS_URL format is invalid".to_string());
+            }
         }
 
-        // Auth configuration
+        // Auth configuration with validation
         if let Ok(secret) = std::env::var("JWT_SECRET") {
-            config.auth.jwt_secret = secret;
+            if Self::validate_jwt_secret(&secret) {
+                config.auth.jwt_secret = secret;
+            } else {
+                validation_errors.push("JWT_SECRET is too weak (minimum 32 characters required)".to_string());
+            }
         }
+        
+        if let Ok(expiry_str) = std::env::var("JWT_EXPIRY_HOURS") {
+            match expiry_str.parse::<u64>() {
+                Ok(expiry) if expiry > 0 && expiry <= 8760 => { // Max 1 year
+                    config.auth.jwt_expiry_hours = expiry;
+                }
+                Ok(expiry) => {
+                    validation_errors.push(format!("JWT_EXPIRY_HOURS {} is out of valid range (1-8760)", expiry));
+                }
+                Err(_) => {
+                    validation_errors.push(format!("JWT_EXPIRY_HOURS '{}' is not a valid number", expiry_str));
+                }
+            }
+        }
+
+        // Sandbox configuration with validation
+        if let Ok(max_sandboxes_str) = std::env::var("SANDBOX_MAX_COUNT") {
+            match max_sandboxes_str.parse::<usize>() {
+                Ok(max_sandboxes) if max_sandboxes > 0 && max_sandboxes <= 10000 => {
+                    config.sandbox.max_sandboxes = max_sandboxes;
+                }
+                Ok(max_sandboxes) => {
+                    validation_errors.push(format!("SANDBOX_MAX_COUNT {} is out of valid range (1-10000)", max_sandboxes));
+                }
+                Err(_) => {
+                    validation_errors.push(format!("SANDBOX_MAX_COUNT '{}' is not a valid number", max_sandboxes_str));
+                }
+            }
+        }
+        
+        if let Ok(timeout_str) = std::env::var("SANDBOX_TIMEOUT_SECONDS") {
+            match timeout_str.parse::<u64>() {
+                Ok(timeout) if timeout > 0 && timeout <= 3600 => { // Max 1 hour
+                    config.sandbox.default_timeout_seconds = timeout;
+                }
+                Ok(timeout) => {
+                    validation_errors.push(format!("SANDBOX_TIMEOUT_SECONDS {} is out of valid range (1-3600)", timeout));
+                }
+                Err(_) => {
+                    validation_errors.push(format!("SANDBOX_TIMEOUT_SECONDS '{}' is not a valid number", timeout_str));
+                }
+            }
+        }
+
+        // Runtime configuration
+        if let Ok(runtime_type) = std::env::var("SANDBOX_RUNTIME_TYPE") {
+            if ["docker", "firecracker"].contains(&runtime_type.as_str()) {
+                config.sandbox.runtime.runtime_type = runtime_type;
+            } else {
+                validation_errors.push(format!("SANDBOX_RUNTIME_TYPE '{}' is not supported (use 'docker' or 'firecracker')", runtime_type));
+            }
+        }
+
+        // Check for validation errors
+        if !validation_errors.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Configuration validation failed:\n{}",
+                validation_errors.join("\n")
+            ));
+        }
+
+        // Perform final validation
+        config.validate()?;
 
         Ok(config)
+    }
+    
+    fn validate_host(host: &str) -> bool {
+        // Allow localhost, IP addresses, and valid hostnames
+        host == "localhost" || 
+        host == "0.0.0.0" || 
+        host.parse::<std::net::IpAddr>().is_ok() ||
+        (host.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-') && !host.is_empty())
+    }
+    
+    fn validate_database_url(url: &str) -> bool {
+        url.starts_with("postgresql://") || 
+        url.starts_with("postgres://") || 
+        url.starts_with("sqlite://") ||
+        url.ends_with(".db") ||
+        url == ":memory:"
+    }
+    
+    fn validate_redis_url(url: &str) -> bool {
+        url.starts_with("redis://") || url.starts_with("rediss://")
+    }
+    
+    fn validate_jwt_secret(secret: &str) -> bool {
+        secret.len() >= 32 && secret != "your-secret-key"
     }
 
     /// Load configuration from a TOML file (soulbox.toml)

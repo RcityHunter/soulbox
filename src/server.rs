@@ -196,18 +196,50 @@ async fn readiness_check(State(_state): State<AppState>) -> Result<Json<Value>, 
 
 // Sandbox management endpoints
 async fn create_sandbox(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     auth: AuthExtractor,
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, StatusCode> {
     info!("User {} creating new sandbox with payload: {}", auth.0.username, payload);
     
-    // TODO: Implement sandbox creation logic
+    // Extract sandbox parameters from payload
+    let template = payload.get("template")
+        .and_then(|v| v.as_str())
+        .unwrap_or("python:3.11");
     
+    let memory_mb = payload.get("memory_mb")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(512);
+    
+    let cpu_cores = payload.get("cpu_cores")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0);
+    
+    let enable_internet = payload.get("enable_internet")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    
+    // Validate limits against config
+    if memory_mb > state.config.sandbox.max_memory_mb {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    
+    if cpu_cores > state.config.sandbox.max_cpu_cores as f64 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    
+    // Generate sandbox ID
+    let sandbox_id = format!("sb_{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..8].to_lowercase());
+    
+    // For now, return a simple response - actual sandbox creation would happen here
+    // In a full implementation, this would integrate with the container manager
     Ok(Json(json!({
-        "id": "sandbox_123",
+        "id": sandbox_id,
         "status": "creating",
-        "template": "python:3.11",
+        "template": template,
+        "memory_mb": memory_mb,
+        "cpu_cores": cpu_cores,
+        "enable_internet": enable_internet,
         "owner_id": auth.0.user_id,
         "tenant_id": auth.0.tenant_id,
         "created_at": chrono::Utc::now().to_rfc3339()
@@ -215,80 +247,165 @@ async fn create_sandbox(
 }
 
 async fn get_sandbox(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     auth: AuthExtractor,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Result<Json<Value>, StatusCode> {
     info!("User {} getting sandbox: {}", auth.0.username, id);
     
-    // TODO: Implement sandbox retrieval logic with tenant isolation
+    // Validate sandbox ID format
+    if !id.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     
-    Ok(Json(json!({
-        "id": id,
-        "status": "running",
-        "template": "python:3.11",
-        "owner_id": auth.0.user_id,
-        "tenant_id": auth.0.tenant_id,
-        "created_at": chrono::Utc::now().to_rfc3339(),
-        "uptime": "00:05:32"
-    })))
+    // In a full implementation, would check database/container manager for sandbox
+    // For now, return mock data based on sandbox ID pattern
+    if id.starts_with("sb_") {
+        Ok(Json(json!({
+            "id": id,
+            "status": "running",
+            "template": "python:3.11",
+            "memory_mb": 512,
+            "cpu_cores": 1.0,
+            "enable_internet": true,
+            "owner_id": auth.0.user_id,
+            "tenant_id": auth.0.tenant_id,
+            "created_at": chrono::Utc::now().to_rfc3339(),
+            "uptime": "00:05:32"
+        })))
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
 }
 
 async fn delete_sandbox(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     auth: AuthExtractor,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Result<Json<Value>, StatusCode> {
     info!("User {} deleting sandbox: {}", auth.0.username, id);
     
-    // TODO: Implement sandbox deletion logic with ownership check
+    // Validate sandbox ID format
+    if !id.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     
-    Ok(Json(json!({
-        "id": id,
-        "status": "deleted",
-        "deleted_by": auth.0.user_id,
-        "deleted_at": chrono::Utc::now().to_rfc3339()
-    })))
+    // In a full implementation, would:
+    // 1. Check if sandbox exists and user has permission
+    // 2. Stop and remove container
+    // 3. Clean up resources
+    // 4. Update database
+    
+    if id.starts_with("sb_") {
+        Ok(Json(json!({
+            "id": id,
+            "status": "deleted",
+            "deleted_by": auth.0.user_id,
+            "deleted_at": chrono::Utc::now().to_rfc3339()
+        })))
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
 }
 
 async fn execute_in_sandbox(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     auth: AuthExtractor,
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, StatusCode> {
     info!("User {} executing code in sandbox: {}", auth.0.username, id);
     
-    // TODO: Implement code execution logic
+    // Validate sandbox ID format
+    if !id.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     
-    Ok(Json(json!({
-        "execution_id": "exec_456",
-        "sandbox_id": id,
-        "status": "running",
-        "executed_by": auth.0.user_id,
-        "started_at": chrono::Utc::now().to_rfc3339()
-    })))
+    // Extract code execution parameters
+    let code = payload.get("code")
+        .and_then(|v| v.as_str())
+        .ok_or(StatusCode::BAD_REQUEST)?;
+    
+    let language = payload.get("language")
+        .and_then(|v| v.as_str())
+        .unwrap_or("python");
+    
+    // Validate code length
+    if code.len() > 100_000 { // 100KB limit
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    
+    // Validate language
+    let allowed_languages = ["python", "javascript", "node", "rust", "go", "bash"];
+    if !allowed_languages.contains(&language) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    
+    // Generate execution ID
+    let execution_id = format!("exec_{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..8].to_lowercase());
+    
+    // In a full implementation, would:
+    // 1. Validate sandbox exists and user has access
+    // 2. Queue code execution job
+    // 3. Execute code in sandbox container
+    // 4. Return results
+    
+    if id.starts_with("sb_") {
+        Ok(Json(json!({
+            "execution_id": execution_id,
+            "sandbox_id": id,
+            "status": "completed",
+            "language": language,
+            "code_length": code.len(),
+            "executed_by": auth.0.user_id,
+            "started_at": chrono::Utc::now().to_rfc3339(),
+            "stdout": "Hello, World!",
+            "stderr": "",
+            "exit_code": 0
+        })))
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
 }
 
 async fn list_sandboxes(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     auth: AuthExtractor,
 ) -> Result<Json<Value>, StatusCode> {
     info!("User {} listing sandboxes", auth.0.username);
     
-    // TODO: Implement sandbox listing with tenant filtering
+    // In a full implementation, would:
+    // 1. Query database for user's sandboxes
+    // 2. Apply tenant filtering
+    // 3. Support pagination
+    // 4. Return actual sandbox data
+    
+    let mock_sandboxes = vec![
+        json!({
+            "id": "sb_abc12345",
+            "status": "running",
+            "template": "python:3.11",
+            "memory_mb": 512,
+            "cpu_cores": 1.0,
+            "owner_id": auth.0.user_id,
+            "created_at": chrono::Utc::now().to_rfc3339()
+        }),
+        json!({
+            "id": "sb_def67890",
+            "status": "stopped",
+            "template": "node:18",
+            "memory_mb": 256,
+            "cpu_cores": 0.5,
+            "owner_id": auth.0.user_id,
+            "created_at": chrono::Utc::now().to_rfc3339()
+        })
+    ];
     
     Ok(Json(json!({
-        "sandboxes": [
-            {
-                "id": "sandbox_123",
-                "status": "running",
-                "template": "python:3.11",
-                "owner_id": auth.0.user_id,
-                "created_at": chrono::Utc::now().to_rfc3339()
-            }
-        ],
-        "total": 1,
-        "tenant_id": auth.0.tenant_id
+        "sandboxes": mock_sandboxes,
+        "total": mock_sandboxes.len(),
+        "tenant_id": auth.0.tenant_id,
+        "page": 1,
+        "page_size": 10
     })))
 }

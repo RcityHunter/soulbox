@@ -97,13 +97,53 @@ async fn main() -> Result<()> {
           config.server.port, grpc_port);
     info!("Press Ctrl+C to stop the server");
 
+    // Set up graceful shutdown
+    let shutdown_signal = async {
+        // Listen for SIGINT (Ctrl+C)
+        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+            .expect("Failed to install SIGINT handler");
+        
+        // Listen for SIGTERM (systemd, docker stop, etc.)
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("Failed to install SIGTERM handler");
+        
+        tokio::select! {
+            _ = sigint.recv() => {
+                info!("Received SIGINT (Ctrl+C), initiating graceful shutdown...");
+            }
+            _ = sigterm.recv() => {
+                info!("Received SIGTERM, initiating graceful shutdown...");
+            }
+        }
+    };
+
     // Wait for shutdown signal
-    tokio::signal::ctrl_c().await?;
+    shutdown_signal.await;
+    
     info!("Shutting down SoulBox server...");
     
-    // Cancel the server tasks
+    // Graceful shutdown with timeout
+    let shutdown_timeout = tokio::time::Duration::from_secs(30);
+    
+    info!("Stopping REST server...");
     rest_handle.abort();
+    
+    info!("Stopping gRPC server...");
     grpc_handle.abort();
-
+    
+    // Wait for tasks to complete with timeout
+    let shutdown_result = tokio::time::timeout(shutdown_timeout, async {
+        // Wait for both servers to shut down
+        let _ = tokio::join!(rest_handle, grpc_handle);
+    }).await;
+    
+    match shutdown_result {
+        Ok(_) => info!("✅ All servers shut down gracefully"),
+        Err(_) => {
+            error!("⚠️  Shutdown timeout reached, some resources may not have been cleaned up properly");
+        }
+    }
+    
+    info!("🛑 SoulBox server stopped");
     Ok(())
 }

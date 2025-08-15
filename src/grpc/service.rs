@@ -6,6 +6,7 @@ use tokio_stream::{Stream, StreamExt};
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{info, warn, error};
 use uuid::Uuid;
+use base64::Engine;
 
 use crate::container::{ResourceLimits as ContainerResourceLimits, NetworkConfig as ContainerNetworkConfig};
 use crate::container::resource_limits::{MemoryLimits, CpuLimits, DiskLimits};
@@ -296,12 +297,29 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
     ) -> Result<Response<ExecuteCodeResponse>, Status> {
         let req = request.into_inner();
         
-        // Validate request
+        // Comprehensive input validation
         if req.sandbox_id.is_empty() {
             return Err(Status::invalid_argument("Sandbox ID is required"));
         }
+        
         if req.code.is_empty() {
             return Err(Status::invalid_argument("Code is required"));
+        }
+        
+        // Validate sandbox ID format (alphanumeric + underscore only)
+        if !req.sandbox_id.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            return Err(Status::invalid_argument("Invalid sandbox ID format"));
+        }
+        
+        // Validate code length (prevent extremely large payloads)
+        if req.code.len() > 1_000_000 { // 1MB limit
+            return Err(Status::invalid_argument("Code too large (max 1MB)"));
+        }
+        
+        // Validate language is supported
+        let allowed_languages = ["javascript", "node", "python", "python3", "rust", "go", "bash", "sh"];
+        if !allowed_languages.contains(&req.language.as_str()) {
+            return Err(Status::invalid_argument("Unsupported language"));
         }
 
         // Check if sandbox exists
@@ -326,35 +344,73 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
             .clone();
         drop(instances);
 
-        // Create execution command based on language
+        // Create secure execution command - use proper file creation instead of echo
+        let start_time = std::time::Instant::now();
+        
+        // Create a secure temporary file path within container
+        let safe_exec_id = execution_id.chars()
+            .filter(|c| c.is_alphanumeric() || *c == '_')
+            .collect::<String>();
+        let temp_dir = format!("/tmp/soulbox_{}", safe_exec_id);
+        
+        // Use a more secure approach - write to temp file using base64 encoding to avoid shell injection
+        let encoded_code = base64::engine::general_purpose::STANDARD.encode(&req.code);
+        
         let command = match req.language.as_str() {
             "javascript" | "node" => {
-                // Create a temporary file and execute with node
+                let filename = format!("{}/code.js", temp_dir);
                 vec![
                     "sh".to_string(),
                     "-c".to_string(),
-                    format!("echo '{}' > /tmp/code.js && node /tmp/code.js", req.code.replace("'", "'\\''")),
+                    format!(
+                        "mkdir -p '{}' && echo '{}' | base64 -d > '{}' && timeout 25 node '{}'",
+                        temp_dir, encoded_code, filename, filename
+                    ),
                 ]
             }
             "python" | "python3" => {
+                let filename = format!("{}/code.py", temp_dir);
                 vec![
                     "sh".to_string(),
                     "-c".to_string(),
-                    format!("echo '{}' > /tmp/code.py && python /tmp/code.py", req.code.replace("'", "'\\''")),
+                    format!(
+                        "mkdir -p '{}' && echo '{}' | base64 -d > '{}' && timeout 25 python3 '{}'",
+                        temp_dir, encoded_code, filename, filename
+                    ),
                 ]
             }
             "rust" => {
+                let filename = format!("{}/main.rs", temp_dir);
+                let binary = format!("{}/main", temp_dir);
                 vec![
                     "sh".to_string(),
                     "-c".to_string(),
-                    format!("echo '{}' > /tmp/main.rs && rustc /tmp/main.rs -o /tmp/main && /tmp/main", req.code.replace("'", "'\\''")),
+                    format!(
+                        "mkdir -p '{}' && echo '{}' | base64 -d > '{}' && timeout 20 rustc '{}' -o '{}' && timeout 5 '{}'",
+                        temp_dir, encoded_code, filename, filename, binary, binary
+                    ),
                 ]
             }
             "go" => {
+                let filename = format!("{}/main.go", temp_dir);
                 vec![
                     "sh".to_string(),
                     "-c".to_string(),
-                    format!("echo '{}' > /tmp/main.go && go run /tmp/main.go", req.code.replace("'", "'\\''")),
+                    format!(
+                        "mkdir -p '{}' && echo '{}' | base64 -d > '{}' && cd '{}' && timeout 25 go run main.go",
+                        temp_dir, encoded_code, filename, temp_dir
+                    ),
+                ]
+            }
+            "bash" | "sh" => {
+                let filename = format!("{}/script.sh", temp_dir);
+                vec![
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    format!(
+                        "mkdir -p '{}' && echo '{}' | base64 -d > '{}' && chmod +x '{}' && timeout 25 '{}'",
+                        temp_dir, encoded_code, filename, filename, filename
+                    ),
                 ]
             }
             _ => {
@@ -362,18 +418,27 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
             }
         };
 
-        // Execute the code in the sandbox
-        let (stdout, stderr, exit_code) = match instance.execute_command(command).await {
-            Ok((out, err, code)) => (out, err, code),
-            Err(e) => {
+        // Execute the code in the sandbox with timeout
+        let execution_result = tokio::time::timeout(
+            std::time::Duration::from_secs(30), // 30 second timeout
+            instance.execute_command(command)
+        ).await;
+
+        let (stdout, stderr, exit_code, timed_out) = match execution_result {
+            Ok(Ok((out, err, code))) => (out, err, code, false),
+            Ok(Err(e)) => {
                 error!("Code execution failed: {}", e);
-                (String::new(), format!("Execution error: {}", e), 1)
+                (String::new(), format!("Execution error: {}", e), 1, false)
+            },
+            Err(_) => {
+                warn!("Code execution timed out for execution: {}", execution_id);
+                (String::new(), "Execution timed out".to_string(), 124, true)
             }
         };
 
         let execution_time = prost_types::Duration {
-            seconds: 0,
-            nanos: 100_000_000, // 100ms
+            seconds: start_time.elapsed().as_secs() as i64,
+            nanos: (start_time.elapsed().subsec_nanos()) as i32,
         };
 
         let response = ExecuteCodeResponse {
@@ -382,7 +447,7 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
             stderr,
             exit_code,
             execution_time: Some(execution_time),
-            timed_out: false,
+            timed_out,
         };
 
         Ok(Response::new(response))

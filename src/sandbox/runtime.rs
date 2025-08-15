@@ -4,12 +4,6 @@ use std::sync::Arc;
 use crate::error::Result;
 use crate::container::{ResourceLimits, NetworkConfig};
 
-/// Runtime type for sandbox execution
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeType {
-    Docker,
-    Firecracker,
-}
 
 /// Common interface for sandbox runtimes
 #[async_trait]
@@ -33,8 +27,6 @@ pub trait SandboxRuntime: Send + Sync {
     /// List all sandboxes
     async fn list_sandboxes(&self) -> Result<Vec<String>>;
 
-    /// Get runtime type
-    fn runtime_type(&self) -> RuntimeType;
 }
 
 /// Common interface for sandbox instances
@@ -99,9 +91,6 @@ impl SandboxRuntime for DockerRuntime {
         Ok(vec![])
     }
 
-    fn runtime_type(&self) -> RuntimeType {
-        RuntimeType::Docker
-    }
 }
 
 /// Docker sandbox instance wrapper
@@ -175,9 +164,6 @@ impl SandboxRuntime for FirecrackerRuntime {
         Ok(vms.into_iter().map(|(id, _)| id).collect())
     }
 
-    fn runtime_type(&self) -> RuntimeType {
-        RuntimeType::Firecracker
-    }
 }
 
 /// Firecracker sandbox instance wrapper

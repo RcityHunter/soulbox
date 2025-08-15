@@ -155,19 +155,104 @@ impl AuthMiddleware {
         Ok(next.run(request).await)
     }
 
-    /// API Key 认证中间件
+    /// API Key authentication middleware
     pub async fn api_key_auth(
-        State(_auth_middleware): State<Arc<Self>>,
-        mut _request: Request,
+        State(auth_middleware): State<Arc<Self>>,
+        mut request: Request,
         next: Next,
     ) -> Result<Response, StatusCode> {
-        // TODO: 实现 API Key 认证
-        // 1. 从头部或查询参数提取 API Key
-        // 2. 验证 API Key
-        // 3. 创建认证上下文
+        // Extract API key from Authorization header or query parameter
+        let api_key = Self::extract_api_key(&request)?;
         
-        // 暂时允许通过
-        Ok(next.run(_request).await)
+        // For now, implement simple API key validation
+        // In production, this would check against a database or key store
+        let is_valid = Self::validate_api_key(&api_key);
+        
+        if !is_valid {
+            warn!("Invalid API key provided: {}", &api_key[..8.min(api_key.len())]);
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+        
+        // Create a basic auth context for API key access
+        let auth_context = AuthContext {
+            user_id: uuid::Uuid::new_v4(), // Would be looked up from API key
+            username: format!("api_user_{}", &api_key[..8.min(api_key.len())]),
+            role: super::models::Role::Developer, // Default role for API access
+            tenant_id: None, // Would be associated with API key
+            permissions: super::models::Role::Developer.permissions(),
+        };
+        
+        // Record API key usage if audit middleware is available
+        if let Some(ref audit_middleware) = auth_middleware.audit_middleware {
+            let _ = audit_middleware.log_auth_event(
+                crate::audit::AuditEventType::ApiKeyUsed,
+                Some(auth_context.user_id),
+                Some(auth_context.username.clone()),
+                true,
+                None,
+                None,
+                None,
+            ).await;
+        }
+        
+        request.extensions_mut().insert(auth_context);
+        
+        Ok(next.run(request).await)
+    }
+    
+    fn extract_api_key(request: &Request) -> Result<String, StatusCode> {
+        // Try Authorization header first (Bearer token)
+        if let Some(auth_header) = request.headers().get(AUTHORIZATION) {
+            if let Ok(auth_str) = auth_header.to_str() {
+                if auth_str.starts_with("Bearer ") {
+                    return Ok(auth_str[7..].to_string());
+                }
+            }
+        }
+        
+        // Try X-API-Key header
+        if let Some(api_key_header) = request.headers().get("x-api-key") {
+            if let Ok(api_key) = api_key_header.to_str() {
+                return Ok(api_key.to_string());
+            }
+        }
+        
+        // Try query parameter
+        if let Some(query) = request.uri().query() {
+            for param in query.split('&') {
+                if let Some((key, value)) = param.split_once('=') {
+                    if key == "api_key" {
+                        return Ok(value.to_string());
+                    }
+                }
+            }
+        }
+        
+        Err(StatusCode::UNAUTHORIZED)
+    }
+    
+    fn validate_api_key(api_key: &str) -> bool {
+        // Basic validation rules for API keys
+        if api_key.len() < 16 || api_key.len() > 128 {
+            return false;
+        }
+        
+        // Check for valid characters (alphanumeric + some special chars)
+        if !api_key.chars().all(|c| c.is_alphanumeric() || "_-".contains(c)) {
+            return false;
+        }
+        
+        // For demo purposes, accept keys starting with "sk_" (similar to many APIs)
+        if api_key.starts_with("sk_") && api_key.len() >= 32 {
+            return true;
+        }
+        
+        // Or keys starting with "soulbox_" for development
+        if api_key.starts_with("soulbox_") && api_key.len() >= 24 {
+            return true;
+        }
+        
+        false
     }
 
     /// 权限检查中间件工厂

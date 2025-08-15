@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use bollard::Docker;
 use bollard::container::{Config as ContainerConfig, CreateContainerOptions};
 use bollard::models::HostConfig;
@@ -13,8 +13,8 @@ use super::{SandboxContainer, ResourceLimits, NetworkConfig};
 pub struct ContainerManager {
     /// Docker client for container operations
     docker: Arc<Docker>,
-    /// Active container instances
-    containers: Arc<Mutex<HashMap<String, Arc<SandboxContainer>>>>,
+    /// Active container instances - using RwLock for better read performance
+    containers: Arc<RwLock<HashMap<String, Arc<SandboxContainer>>>>,
     /// Global configuration
     config: Config,
 }
@@ -41,7 +41,7 @@ impl ContainerManager {
         
         Ok(Self {
             docker: Arc::new(docker),
-            containers: Arc::new(Mutex::new(HashMap::new())),
+            containers: Arc::new(RwLock::new(HashMap::new())),
             config,
         })
     }
@@ -122,15 +122,15 @@ impl ContainerManager {
         )?);
         
         // Store in our container registry
-        let mut containers = self.containers.lock().await;
+        let mut containers = self.containers.write().await;
         containers.insert(sandbox_id.to_string(), container.clone());
         
         Ok(container)
     }
 
     pub async fn list_containers(&self) -> Result<Vec<ContainerInfo>> {
-        // TODO: Implement actual container listing
-        let containers = self.containers.lock().await;
+        // Use read lock for better performance when multiple readers
+        let containers = self.containers.read().await;
         let mut container_infos = Vec::new();
         
         for (id, container) in containers.iter() {
@@ -143,6 +143,16 @@ impl ContainerManager {
         }
 
         Ok(container_infos)
+    }
+    
+    pub async fn get_container(&self, sandbox_id: &str) -> Option<Arc<SandboxContainer>> {
+        let containers = self.containers.read().await;
+        containers.get(sandbox_id).cloned()
+    }
+    
+    pub async fn remove_container(&self, sandbox_id: &str) -> Result<bool> {
+        let mut containers = self.containers.write().await;
+        Ok(containers.remove(sandbox_id).is_some())
     }
 }
 

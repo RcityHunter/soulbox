@@ -1,3 +1,4 @@
 pub mod runtime;
 
-pub use runtime::{SandboxRuntime, SandboxInstance, RuntimeType, DockerRuntime, FirecrackerRuntime};
+// Simplified re-exports - only expose what's actually needed
+pub use runtime::{SandboxRuntime, SandboxInstance, DockerRuntime, FirecrackerRuntime};

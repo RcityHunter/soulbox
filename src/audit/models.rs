@@ -16,6 +16,7 @@ pub enum AuditEventType {
     TokenRefresh,
     ApiKeyCreated,
     ApiKeyRevoked,
+    ApiKeyUsed,
     
     // 权限事件
     PermissionGranted,
