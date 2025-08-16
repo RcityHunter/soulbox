@@ -379,7 +379,7 @@ impl SurrealPool {
         let mut connections = self.connections.write().await;
         connections.clear();
         
-        info!("SurrealDB 连接池已关闭");
+        info!("SurrealDB connection pool closed");
     }
 }
 
@@ -429,9 +429,9 @@ impl SurrealConnection {
         let result = self.db
             .query(sql)
             .await
-            .map_err(|e| SurrealConnectionError::Query(format!("查询执行失败: {}", e)))?
+            .map_err(|e| SurrealConnectionError::Query(format!("Query execution failed: {}", e)))?
             .take(0)
-            .map_err(|e| SurrealConnectionError::Query(format!("结果解析失败: {}", e)));
+            .map_err(|e| SurrealConnectionError::Query(format!("Result parsing failed: {}", e)));
         
         let elapsed = start.elapsed();
         
@@ -447,12 +447,12 @@ impl SurrealConnection {
 
 impl Drop for SurrealConnection {
     fn drop(&mut self) {
-        debug!("释放数据库连接，使用时长: {:?}", self.created_at.elapsed());
+        debug!("Releasing database connection, usage time: {:?}", self.created_at.elapsed());
         
         // Release the connection back to the pool by setting in_use to false
         if let Some(ref in_use_flag) = self.in_use_flag {
             in_use_flag.store(false, std::sync::atomic::Ordering::SeqCst);
-            debug!("连接已释放回连接池");
+            debug!("Connection released back to pool");
         }
     }
 }

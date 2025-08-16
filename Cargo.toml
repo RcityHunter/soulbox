@@ -88,12 +88,23 @@ base64 = "0.21"
 # Database
 surrealdb = { version = "1.5", features = ["kv-rocksdb"] }
 
+# Redis for session persistence
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+
+# Prometheus metrics
+prometheus = "0.13"
+axum-prometheus = "0.4"
+
+# Regex for runtime detection
+regex = "1.10"
+
 [build-dependencies]
 tonic-build = "0.10"
 
 [dev-dependencies]
 reqwest = { version = "0.11", features = ["json"] }
 tokio-test = "0.4"
+criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bin]]
 name = "soulbox"

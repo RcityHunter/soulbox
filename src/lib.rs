@@ -13,6 +13,9 @@ pub mod sandbox;
 pub mod database;
 pub mod template;
 pub mod cli;
+pub mod session;
+pub mod runtime;
+pub mod monitoring;
 
 // Simple implementation - Linus style
 pub mod simple;
@@ -23,6 +26,11 @@ pub use auth::{JwtManager, api_key::ApiKeyManager, middleware::AuthMiddleware};
 pub use api::auth::{AuthState, auth_routes};
 pub use audit::{AuditService, AuditConfig, AuditMiddleware, AuditEventType};
 pub use template::{TemplateManager, Template, TemplateError};
+
+// New module exports
+pub use session::{Session, SessionManager, InMemorySessionManager};
+pub use runtime::{RuntimeType, RuntimeManager, RuntimeConfig, ExecutionContext};
+pub use monitoring::{MonitoringConfig, MonitoringService, PerformanceMetrics, HealthCheck, HealthStatus};
 
 // Include generated protobuf code
 pub mod proto {
