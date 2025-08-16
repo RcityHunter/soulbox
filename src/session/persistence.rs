@@ -1,4 +1,5 @@
-use redis::{AsyncCommands, Client, ConnectionManager};
+use redis::{AsyncCommands, Client};
+use redis::aio::ConnectionManager;
 use serde_json;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -98,23 +99,31 @@ impl SessionManager for RedisSessionManager {
         let session_data = self.serialize_session(&session)?;
         let ttl = self.calculate_ttl(&session);
         
+        // Validate TTL is reasonable (prevent memory leaks from very long sessions)
+        let ttl = ttl.min(7 * 24 * 3600); // Max 7 days
+        
         let mut conn = self.connection.clone();
+        
+        // Use Redis pipeline for atomic operations
+        let mut pipe = redis::pipe();
         
         // Store session data with TTL
         let session_key = self.session_key(session.id);
-        conn.set_ex(&session_key, &session_data, ttl).await
-            .map_err(|e| SoulBoxError::SessionError(format!("Failed to store session: {}", e)))?;
+        pipe.set_ex(&session_key, &session_data, ttl);
         
-        // Add to user sessions set
+        // Add to user sessions set and update TTL atomically
         let user_sessions_key = self.user_sessions_key(&user_id);
-        conn.sadd(&user_sessions_key, session.id.to_string()).await
-            .map_err(|e| SoulBoxError::SessionError(format!("Failed to add to user sessions: {}", e)))?;
+        pipe.sadd(&user_sessions_key, session.id.to_string());
         
-        // Set TTL on user sessions set
-        conn.expire(&user_sessions_key, ttl as i64).await
-            .map_err(|e| SoulBoxError::SessionError(format!("Failed to set user sessions TTL: {}", e)))?;
+        // Set user sessions set TTL to maximum session TTL + buffer for cleanup
+        let user_set_ttl = ttl + 86400; // +24 hours buffer for cleanup
+        pipe.expire(&user_sessions_key, user_set_ttl as i64);
         
-        info!("Created session {} for user {}", session.id, user_id);
+        // Execute pipeline atomically
+        pipe.query_async(&mut conn).await
+            .map_err(|e| SoulBoxError::SessionError(format!("Failed to create session atomically: {}", e)))?;
+        
+        info!("Created session {} for user {} with TTL {}s", session.id, user_id, ttl);
         Ok(session)
     }
     
@@ -151,19 +160,32 @@ impl SessionManager for RedisSessionManager {
             return self.delete_session(session.id).await;
         }
         
+        // Validate TTL is reasonable (prevent memory leaks)
+        let ttl = ttl.min(7 * 24 * 3600); // Max 7 days
+        
         let mut conn = self.connection.clone();
-        let session_key = self.session_key(session.id);
+        
+        // Use Redis pipeline for atomic updates
+        let mut pipe = redis::pipe();
         
         // Update session data with new TTL
-        conn.set_ex(&session_key, &session_data, ttl).await
-            .map_err(|e| SoulBoxError::SessionError(format!("Failed to update session: {}", e)))?;
+        let session_key = self.session_key(session.id);
+        pipe.set_ex(&session_key, &session_data, ttl);
+        
+        // Update user sessions set TTL to ensure it doesn't expire before sessions
+        let user_sessions_key = self.user_sessions_key(&session.user_id);
+        let user_set_ttl = ttl + 86400; // +24 hours buffer
+        pipe.expire(&user_sessions_key, user_set_ttl as i64);
         
         // Update container mapping if container is set
         if let Some(container_id) = &session.container_id {
             let container_key = self.container_session_key(container_id);
-            conn.set_ex(&container_key, session.id.to_string(), ttl).await
-                .map_err(|e| SoulBoxError::SessionError(format!("Failed to update container mapping: {}", e)))?;
+            pipe.set_ex(&container_key, session.id.to_string(), ttl);
         }
+        
+        // Execute all updates atomically
+        pipe.query_async(&mut conn).await
+            .map_err(|e| SoulBoxError::SessionError(format!("Failed to update session atomically: {}", e)))?;
         
         Ok(())
     }
@@ -279,8 +301,30 @@ impl SessionManager for RedisSessionManager {
         Ok(cleaned)
     }
     
+    async fn get_session_by_container(&self, container_id: &str) -> Result<Option<Session>> {
+        let mut conn = self.connection.clone();
+        let container_key = self.container_session_key(container_id);
+        
+        let session_id_str: Option<String> = conn.get(&container_key).await
+            .map_err(|e| SoulBoxError::SessionError(format!("Failed to get container session: {}", e)))?;
+        
+        match session_id_str {
+            Some(id_str) => {
+                if let Ok(session_id) = Uuid::parse_str(&id_str) {
+                    self.get_session(session_id).await
+                } else {
+                    Ok(None)
+                }
+            }
+            None => Ok(None),
+        }
+    }
+}
+
+// Helper methods for RedisSessionManager
+impl RedisSessionManager {
     /// Clean up session-related references
-    async fn cleanup_session_references(&self, session_key: &str, conn: &mut redis::ConnectionManager) -> Result<()> {
+    async fn cleanup_session_references(&self, session_key: &str, conn: &mut ConnectionManager) -> Result<()> {
         // Extract session ID from key
         if let Some(session_id_part) = session_key.split(':').last() {
             if let Ok(session_id) = uuid::Uuid::parse_str(session_id_part) {
@@ -304,25 +348,6 @@ impl SessionManager for RedisSessionManager {
             }
         }
         Ok(())
-    }
-    
-    async fn get_session_by_container(&self, container_id: &str) -> Result<Option<Session>> {
-        let mut conn = self.connection.clone();
-        let container_key = self.container_session_key(container_id);
-        
-        let session_id_str: Option<String> = conn.get(&container_key).await
-            .map_err(|e| SoulBoxError::SessionError(format!("Failed to get container session: {}", e)))?;
-        
-        match session_id_str {
-            Some(id_str) => {
-                if let Ok(session_id) = Uuid::parse_str(&id_str) {
-                    self.get_session(session_id).await
-                } else {
-                    Ok(None)
-                }
-            }
-            None => Ok(None),
-        }
     }
 }
 

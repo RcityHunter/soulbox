@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use sysinfo::{System, SystemExt, CpuExt, ProcessExt};
+use sysinfo::{System, Cpu, Process};
 use crate::error::{Result, SoulBoxError};
 use crate::container::manager::ContainerManager;
 use crate::session::SessionManager;
@@ -159,7 +159,7 @@ pub struct ProcessInfo {
 
 /// Container resource collector for gathering container-specific metrics
 pub struct ContainerResourceCollector {
-    container_manager: Arc<dyn ContainerManager>,
+    container_manager: Arc<ContainerManager>,
     metrics: Arc<PrometheusMetrics>,
     collection_interval: Duration,
     last_collection: Option<Instant>,
@@ -168,7 +168,7 @@ pub struct ContainerResourceCollector {
 impl ContainerResourceCollector {
     /// Create a new container resource collector
     pub fn new(
-        container_manager: Arc<dyn ContainerManager>,
+        container_manager: Arc<ContainerManager>,
         metrics: Arc<PrometheusMetrics>,
         collection_interval: Duration,
     ) -> Self {
@@ -323,7 +323,7 @@ pub struct MetricsCollectionService {
 impl MetricsCollectionService {
     /// Create a new metrics collection service
     pub fn new(
-        container_manager: Arc<dyn ContainerManager>,
+        container_manager: Arc<ContainerManager>,
         session_manager: Arc<dyn SessionManager>,
         metrics: Arc<PrometheusMetrics>,
         collection_interval: Duration,

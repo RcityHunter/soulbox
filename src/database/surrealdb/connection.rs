@@ -365,7 +365,7 @@ impl SurrealPool {
         
         debug!("数据库连接健康检查通过");
         Ok(())
-    }"}
+    }
     
     /// 获取连接池统计信息
     pub async fn stats(&self) -> PoolStats {
@@ -379,7 +379,7 @@ impl SurrealPool {
         let mut connections = self.connections.write().await;
         connections.clear();
         
-        info!("SurrealDB connection pool closed");
+        info!("SurrealDB connection pool closed ");
     }
 }
 
@@ -452,7 +452,7 @@ impl Drop for SurrealConnection {
         // Release the connection back to the pool by setting in_use to false
         if let Some(ref in_use_flag) = self.in_use_flag {
             in_use_flag.store(false, std::sync::atomic::Ordering::SeqCst);
-            debug!("Connection released back to pool");
+            debug!("Connection released back to pool ");
         }
     }
 }

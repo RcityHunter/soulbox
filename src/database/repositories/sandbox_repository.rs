@@ -5,7 +5,7 @@ use tracing::{info, error, debug};
 use uuid::Uuid;
 
 use crate::database::surrealdb::{
-    SurrealPool, SurrealOperations, QueryBuilder as SurrealQueryBuilder, UpdateBuilder, 
+    SurrealPool, SurrealOperations, 
     uuid_to_record_id, record_id_to_uuid, SurrealResult, SurrealConnectionError, PaginationResult
 };
 use crate::database::{DatabaseError, DatabaseResult, models::{DbSandbox, PaginatedResult}};
@@ -456,16 +456,4 @@ impl SandboxRepository {
 }
 
 // Convert DatabaseError from SurrealConnectionError
-impl From<SurrealConnectionError> for DatabaseError {
-    fn from(err: SurrealConnectionError) -> Self {
-        match err {
-            SurrealConnectionError::Connection(msg) => DatabaseError::Connection(msg),
-            SurrealConnectionError::Query(msg) => DatabaseError::Query(msg),
-            SurrealConnectionError::PoolExhausted => DatabaseError::Connection("Connection pool exhausted".to_string()),
-            SurrealConnectionError::HealthCheck(msg) => DatabaseError::Connection(format!("Health check failed: {}", msg)),
-            SurrealConnectionError::Auth(msg) => DatabaseError::Connection(format!("Authentication failed: {}", msg)),
-            SurrealConnectionError::Config(msg) => DatabaseError::Connection(format!("Configuration error: {}", msg)),
-            SurrealConnectionError::Surreal(e) => DatabaseError::Other(e.to_string()),
-        }
-    }
-}
+// Note: From<SurrealConnectionError> implementation is in database/mod.rs to avoid duplicates

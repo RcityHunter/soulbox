@@ -37,47 +37,127 @@ pub enum SoulBoxError {
     #[error("gRPC status error: {0}")]
     Status(#[from] tonic::Status),
 
+    // Container-specific errors with detailed context
+    #[error("Container creation failed: {message}")]
+    ContainerCreationFailed { message: String, container_id: Option<String> },
+    
+    #[error("Container start failed: {message}")]
+    ContainerStartFailed { message: String, container_id: String },
+    
+    #[error("Container stop failed: {message}")]
+    ContainerStopFailed { message: String, container_id: String },
+    
+    #[error("Container not found: {container_id}")]
+    ContainerNotFound { container_id: String },
+    
+    #[error("Container pool exhausted for runtime: {runtime}")]
+    ContainerPoolExhausted { runtime: String, max_containers: u32 },
+    
+    // Generic container error fallback
     #[error("Container error: {0}")]
     Container(#[from] bollard::errors::Error),
 
-    #[error("Filesystem error: {0}")]
-    Filesystem(String),
+    // Filesystem errors with detailed context
+    #[error("File not found: {path}")]
+    FileNotFound { path: String },
+    
+    #[error("Permission denied accessing: {path}")]
+    FilePermissionDenied { path: String },
+    
+    #[error("Disk space insufficient: {required_bytes} bytes needed, {available_bytes} available")]
+    DiskSpaceInsufficient { required_bytes: u64, available_bytes: u64 },
+    
+    #[error("File operation failed: {operation} on {path} - {reason}")]
+    FileOperationFailed { operation: String, path: String, reason: String },
 
-    #[error("Resource limit exceeded: {0}")]
-    ResourceLimit(String),
+    // Resource limit errors with specific details
+    #[error("Memory limit exceeded: {used_bytes} bytes used, limit is {limit_bytes} bytes")]
+    MemoryLimitExceeded { used_bytes: u64, limit_bytes: u64 },
+    
+    #[error("CPU limit exceeded: {usage_percent}% usage, limit is {limit_percent}%")]
+    CpuLimitExceeded { usage_percent: f64, limit_percent: f64 },
+    
+    #[error("Network bandwidth limit exceeded: {usage_bps} bps, limit is {limit_bps} bps")]
+    NetworkBandwidthExceeded { usage_bps: u64, limit_bps: u64 },
+    
+    #[error("Process limit exceeded: {process_count} processes, limit is {limit_count}")]
+    ProcessLimitExceeded { process_count: u32, limit_count: u32 },
 
-    #[error("Security violation: {0}")]
-    Security(String),
+    // Security errors with threat classification
+    #[error("Authentication failed: {reason}")]
+    AuthenticationFailed { reason: String, user_id: Option<String> },
+    
+    #[error("Authorization denied: {action} on {resource}")]
+    AuthorizationDenied { action: String, resource: String, user_id: Option<String> },
+    
+    #[error("Malicious code detected: {threat_type} in {location}")]
+    MaliciousCodeDetected { threat_type: String, location: String },
+    
+    #[error("Rate limit exceeded: {requests} requests in {window_seconds}s, limit is {limit}")]
+    RateLimitExceeded { requests: u32, window_seconds: u32, limit: u32 },
+    
+    #[error("Input validation failed: {field} - {reason}")]
+    InputValidationFailed { field: String, reason: String },
 
+    // Network errors with detailed context
+    #[error("Port allocation failed: port {port} already in use")]
+    PortAllocationFailed { port: u16, sandbox_id: Option<String> },
+    
+    #[error("Network connection failed: {endpoint} - {reason}")]
+    NetworkConnectionFailed { endpoint: String, reason: String },
+    
+    #[error("DNS resolution failed: {hostname}")]
+    DnsResolutionFailed { hostname: String },
+    
+    #[error("Proxy configuration invalid: {proxy_type} - {reason}")]
+    ProxyConfigurationInvalid { proxy_type: String, reason: String },
+
+    // Database errors with operation context
+    #[error("Database connection failed: {database_type} at {endpoint}")]
+    DatabaseConnectionFailed { database_type: String, endpoint: String },
+    
+    #[error("Database query failed: {query_type} - {reason}")]
+    DatabaseQueryFailed { query_type: String, reason: String },
+    
+    #[error("Database transaction failed: {operation} - {reason}")]
+    DatabaseTransactionFailed { operation: String, reason: String },
+    
+    #[error("Database migration failed: version {version} - {reason}")]
+    DatabaseMigrationFailed { version: String, reason: String },
+
+    // Session errors with detailed context
+    #[error("Session not found: {session_id}")]
+    SessionNotFound { session_id: String },
+    
+    #[error("Session expired: {session_id}, expired at {expired_at}")]
+    SessionExpired { session_id: String, expired_at: String },
+    
+    #[error("Session creation failed: {reason}")]
+    SessionCreationFailed { reason: String, user_id: Option<String> },
+
+    // Timeout errors with operation context
+    #[error("Operation timeout: {operation} took longer than {timeout_seconds}s")]
+    OperationTimeout { operation: String, timeout_seconds: u64 },
+    
+    #[error("Deadline exceeded: {operation} deadline was {deadline}")]
+    DeadlineExceeded { operation: String, deadline: String },
+
+    // Configuration errors
+    #[error("Configuration error: {parameter} - {reason}")]
+    Configuration { parameter: String, reason: String },
+    
+    #[error("Environment variable missing: {variable}")]
+    EnvironmentVariableMissing { variable: String },
+    
+    #[error("Configuration validation failed: {section} - {errors}")]
+    ConfigurationValidationFailed { section: String, errors: Vec<String> },
+
+    // Legacy broad error types (to be gradually replaced)
     #[error("Internal error: {0}")]
     Internal(String),
 
-    #[error("Not found: {0}")]
-    NotFound(String),
-
-    #[error("Invalid state: {0}")]
-    InvalidState(String),
-
     #[error("Unsupported operation: {0}")]
     Unsupported(String),
-
-    #[error("Database error: {0}")]
-    Database(#[from] sqlx::Error),
-
-    #[error("Template error: {0}")]
-    Template(String),
-
-    #[error("Audit error: {0}")]
-    Audit(String),
-
-    #[error("Network error: {0}")]
-    Network(String),
-
-    #[error("Timeout error: {0}")]
-    Timeout(String),
-
-    #[error("Validation error: {0}")]
-    Validation(String),
 
     #[error("API error: {0}")]
     Api(String),

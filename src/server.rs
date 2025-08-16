@@ -8,8 +8,8 @@ use crate::auth::middleware::{AuthMiddleware, AuthExtractor};
 use crate::auth::models::Permission;
 use crate::auth::{api_key::ApiKeyManager, JwtManager};
 use crate::config::Config;
-use crate::database::Database;
-use crate::error::Result as SoulBoxResult;
+use crate::database::SurrealPool;
+use crate::error::{Result as SoulBoxResult, SoulBoxError};
 use axum::{
     extract::State,
     http::StatusCode,
@@ -33,7 +33,7 @@ pub struct AppState {
     pub template_state: Option<TemplateState>,
     pub auth_middleware: Arc<AuthMiddleware>,
     pub audit_middleware: Arc<AuditMiddleware>,
-    pub database: Option<Arc<Database>>,
+    pub database: Option<Arc<SurrealPool>>,
 }
 
 pub struct Server {
@@ -43,17 +43,28 @@ pub struct Server {
 
 impl Server {
     pub async fn new(config: Config) -> SoulBoxResult<Self> {
-        // 初始化数据库（如果配置了）
-        let database: Option<Arc<Database>> = if let Ok(_db_url) = std::env::var("DATABASE_URL") {
-            info!("Initializing database connection...");
-            let db_config = config.database.clone().into();
-            match Database::new(db_config).await {
-                Ok(db) => {
-                    info!("Database connected successfully");
-                    Some(Arc::new(db))
+        // 初始化 SurrealDB 数据库（如果配置了）
+        let database: Option<Arc<SurrealPool>> = if let Ok(_db_url) = std::env::var("DATABASE_URL") {
+            info!("Initializing SurrealDB connection...");
+            // Create a default SurrealDB configuration
+            let surreal_config = crate::database::SurrealConfig {
+                protocol: crate::database::SurrealProtocol::RocksDb,
+                endpoint: "rocksdb://./soulbox.db".to_string(),
+                namespace: "soulbox".to_string(),
+                database: "main".to_string(),
+                username: None,
+                password: None,
+                pool: Default::default(),
+                retry: Default::default(),
+            };
+            
+            match SurrealPool::new(surreal_config).await {
+                Ok(pool) => {
+                    info!("SurrealDB connected successfully");
+                    Some(Arc::new(pool))
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to connect to database: {}. Running without persistence.", e);
+                    tracing::warn!("Failed to connect to SurrealDB: {}. Running without persistence.", e);
                     None
                 }
             }
@@ -62,15 +73,20 @@ impl Server {
             None
         };
 
-        // 创建认证管理器
+        // 创建认证管理器并强制使用安全的JWT配置
         let jwt_secret = std::env::var("JWT_SECRET")
-            .unwrap_or_else(|_| "demo-jwt-secret-change-in-production".to_string());
+            .map_err(|_| SoulBoxError::Configuration(
+                "JWT_SECRET environment variable is required for production use. \
+                Please set a strong, randomly generated secret of at least 32 characters.".to_string()
+            ))?;
         
         let jwt_manager = Arc::new(JwtManager::new(
             &jwt_secret,
             "soulbox".to_string(),
             "soulbox-api".to_string(),
-        ));
+        ).map_err(|e| SoulBoxError::Configuration(
+            format!("Failed to initialize JWT manager with secure configuration: {}", e)
+        ))?);
         
         let api_key_manager = Arc::new(ApiKeyManager::new("sk".to_string()));
         

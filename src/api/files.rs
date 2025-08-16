@@ -8,6 +8,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use base64::Engine;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -100,7 +101,7 @@ pub async fn upload_file(
         .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid sandbox ID"}))))?;
 
     // Decode base64 content
-    let content = base64::decode(&request.content)
+    let content = base64::engine::general_purpose::STANDARD.decode(&request.content)
         .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid base64 content"}))))?;
 
     // TODO: Get actual SandboxFileSystem instance for the sandbox
@@ -131,7 +132,7 @@ pub async fn download_file(
     let mock_content = if encoding == "text" {
         "Hello, World!".to_string()
     } else {
-        base64::encode("Hello, World!")
+        base64::engine::general_purpose::STANDARD.encode("Hello, World!")
     };
 
     let response = json!({

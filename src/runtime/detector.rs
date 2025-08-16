@@ -105,7 +105,7 @@ impl RuntimeDetector {
                 confidence: 0.9,
             },
             ContentPattern {
-                pattern: Regex::new(r"if\s+__name__\s*==\s*['\"]__main__['\"]").unwrap(),
+                pattern: Regex::new(r#"if\s+__name__\s*==\s*['"]__main__['"]"#).unwrap(),
                 runtime_type: RuntimeType::Python,
                 confidence: 0.95,
             },
@@ -117,7 +117,7 @@ impl RuntimeDetector {
                 confidence: 0.7,
             },
             ContentPattern {
-                pattern: Regex::new(r"require\s*\(['\"][^'\"]*['\"]\)").unwrap(),
+                pattern: Regex::new(r#"require\s*\(['"][^'"]*['"]\)"#).unwrap(),
                 runtime_type: RuntimeType::NodeJS,
                 confidence: 0.9,
             },
@@ -173,7 +173,7 @@ impl RuntimeDetector {
                 confidence: 0.8,
             },
             ContentPattern {
-                pattern: Regex::new(r"import\s+[\"']\w+[\"']").unwrap(),
+                pattern: Regex::new(r#"import\s+["']\w+["']"#).unwrap(),
                 runtime_type: RuntimeType::Go,
                 confidence: 0.7,
             },
@@ -531,7 +531,7 @@ impl Default for RuntimeDetector {
 }
 
 /// Convenience function for runtime detection from content
-pub fn detect_runtime_from_content(content: &str, runtimes: &HashMap<String, RuntimeConfig>) -> Option<&RuntimeConfig> {
+pub fn detect_runtime_from_content<'a>(content: &str, runtimes: &'a HashMap<String, RuntimeConfig>) -> Option<&'a RuntimeConfig> {
     let detector = RuntimeDetector::new();
     
     if let Some(result) = detector.detect_from_content(content) {
@@ -574,7 +574,8 @@ mod tests {
         assert_eq!(result.runtime_type, RuntimeType::Python);
         assert!(matches!(result.detection_method, DetectionMethod::Shebang));
         
-        let node_script = "#!/usr/bin/node\nconsole.log('hello')";
+        let node_script = r#"#!/usr/bin/node
+console.log('hello')"#;
         let result = detector.detect_from_content(node_script).unwrap();
         assert_eq!(result.runtime_type, RuntimeType::NodeJS);
     }
@@ -584,12 +585,17 @@ mod tests {
         let detector = RuntimeDetector::new();
         
         // Python patterns
-        let python_code = "import os\ndef main():\n    print('hello')\nif __name__ == '__main__':\n    main()";
+        let python_code = r#"import os
+def main():
+    print('hello')
+if __name__ == '__main__':
+    main()"#;
         let result = detector.detect_from_content(python_code).unwrap();
         assert_eq!(result.runtime_type, RuntimeType::Python);
         
         // JavaScript patterns
-        let js_code = "const express = require('express');\nconsole.log('starting server');";
+        let js_code = r#"const express = require('express');
+console.log('starting server');"#;
         let result = detector.detect_from_content(js_code).unwrap();
         assert_eq!(result.runtime_type, RuntimeType::NodeJS);
         

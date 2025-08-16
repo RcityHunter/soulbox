@@ -1,13 +1,13 @@
 pub mod config;
-pub mod connection;
+// pub mod connection;  // Legacy sqlx-based connection - disabled in favor of SurrealDB
 pub mod models;
 pub mod repositories;
-pub mod migrations;
+// pub mod migrations;  // Legacy sqlx-based migrations - disabled in favor of SurrealDB
 pub mod surrealdb;
 
-// Legacy exports for backward compatibility
-pub use config::{DatabaseConfig, DatabaseType, PoolConfig};
-pub use connection::{Database, DatabasePool};
+// Legacy exports for backward compatibility (commented out for SurrealDB migration)
+// pub use config::{DatabaseConfig, DatabaseType, PoolConfig};
+// pub use connection::{Database, DatabasePool};
 
 // New SurrealDB exports
 pub use surrealdb::{
@@ -17,6 +17,7 @@ pub use surrealdb::{
 };
 
 pub use repositories::*;
+// use surrealdb::sql::Value;
 
 /// 数据库错误类型
 #[derive(Debug, thiserror::Error)]
@@ -46,24 +47,24 @@ pub enum DatabaseError {
     Other(String),
 }
 
-// Maintain compatibility with the old sqlx-based code
-#[cfg(feature = "sqlx-compat")]
-impl From<sqlx::Error> for DatabaseError {
-    fn from(err: sqlx::Error) -> Self {
-        match err {
-            sqlx::Error::RowNotFound => DatabaseError::NotFound,
-            sqlx::Error::Database(db_err) => {
-                // 检查是否是唯一约束违规
-                if db_err.message().contains("UNIQUE") || db_err.message().contains("duplicate") {
-                    DatabaseError::Duplicate
-                } else {
-                    DatabaseError::Query(db_err.message().to_string())
-                }
-            }
-            _ => DatabaseError::Other(err.to_string()),
-        }
-    }
-}
+// Legacy sqlx compatibility code - commented out for SurrealDB migration
+// #[cfg(feature = "sqlx-compat")]
+// impl From<sqlx::Error> for DatabaseError {
+//     fn from(err: sqlx::Error) -> Self {
+//         match err {
+//             sqlx::Error::RowNotFound => DatabaseError::NotFound,
+//             sqlx::Error::Database(db_err) => {
+//                 // 检查是否是唯一约束违规
+//                 if db_err.message().contains("UNIQUE") || db_err.message().contains("duplicate") {
+//                     DatabaseError::Duplicate
+//                 } else {
+//                     DatabaseError::Query(db_err.message().to_string())
+//                 }
+//             }
+//             _ => DatabaseError::Other(err.to_string()),
+//         }
+//     }
+// }
 
 // Convert from SurrealDB connection errors
 impl From<SurrealConnectionError> for DatabaseError {
@@ -82,10 +83,11 @@ impl From<SurrealConnectionError> for DatabaseError {
 
 pub type DatabaseResult<T> = Result<T, DatabaseError>;
 
-/// Database abstraction that can work with both legacy sqlx and new SurrealDB
+/// Database abstraction for SurrealDB  
 pub enum DatabaseBackend {
-    #[cfg(feature = "sqlx-compat")]
-    Legacy(Database),
+    // Legacy sqlx support removed in favor of SurrealDB
+    // #[cfg(feature = "sqlx-compat")]
+    // Legacy(Database),
     Surreal(std::sync::Arc<SurrealPool>),
 }
 
@@ -97,30 +99,31 @@ impl DatabaseBackend {
         Ok(Self::Surreal(std::sync::Arc::new(pool)))
     }
     
-    /// Create legacy sqlx backend (for backward compatibility)
-    #[cfg(feature = "sqlx-compat")]
-    pub async fn new_legacy(config: DatabaseConfig) -> DatabaseResult<Self> {
-        let db = Database::new(config).await?;
-        Ok(Self::Legacy(db))
-    }
+    // Legacy sqlx backend support removed
+    // #[cfg(feature = "sqlx-compat")]
+    // pub async fn new_legacy(config: DatabaseConfig) -> DatabaseResult<Self> {
+    //     let db = Database::new(config).await?;
+    //     Ok(Self::Legacy(db))
+    // }
     
     /// Get SurrealDB pool if using SurrealDB backend
     pub fn surreal_pool(&self) -> Option<std::sync::Arc<SurrealPool>> {
         match self {
             Self::Surreal(pool) => Some(pool.clone()),
-            #[cfg(feature = "sqlx-compat")]
-            Self::Legacy(_) => None,
+            // Legacy support removed
+            // #[cfg(feature = "sqlx-compat")]
+            // Self::Legacy(_) => None,
         }
     }
     
-    /// Get legacy database if using legacy backend
-    #[cfg(feature = "sqlx-compat")]
-    pub fn legacy_db(&self) -> Option<&Database> {
-        match self {
-            Self::Legacy(db) => Some(db),
-            Self::Surreal(_) => None,
-        }
-    }
+    // Legacy database access removed
+    // #[cfg(feature = "sqlx-compat")]
+    // pub fn legacy_db(&self) -> Option<&Database> {
+    //     match self {
+    //         Self::Legacy(db) => Some(db),
+    //         Self::Surreal(_) => None,
+    //     }
+    // }
     
     /// Health check for the database backend
     pub async fn health_check(&self) -> DatabaseResult<()> {
@@ -130,12 +133,13 @@ impl DatabaseBackend {
                     .map_err(|e| DatabaseError::Connection(e.to_string()))?;
                 // Simple health check query
                 let ops = SurrealOperations::new(&conn);
-                ops.query::<surrealdb::Value>("SELECT 1 as health_check").await
+                ops.query::<serde_json::Value>("SELECT 1 as health_check").await
                     .map_err(|e| DatabaseError::Query(e.to_string()))?;
                 Ok(())
             }
-            #[cfg(feature = "sqlx-compat")]
-            Self::Legacy(db) => db.health_check().await,
+            // Legacy health check removed
+            // #[cfg(feature = "sqlx-compat")]
+            // Self::Legacy(db) => db.health_check().await,
         }
     }
 }

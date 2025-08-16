@@ -91,12 +91,25 @@ surrealdb = { version = "1.5", features = ["kv-rocksdb"] }
 # Redis for session persistence
 redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
 
+# Parking lot for better synchronization primitives
+parking_lot = "0.12"
+
+# Atomic utilities
+atomic = "0.6"
+
 # Prometheus metrics
 prometheus = "0.13"
 axum-prometheus = "0.4"
 
 # Regex for runtime detection
 regex = "1.10"
+
+# Compression for dependency caching
+flate2 = "1.0"
+
+# URL parsing for proxy
+url = "2.4"
+urlencoding = "2.1"
 
 [build-dependencies]
 tonic-build = "0.10"

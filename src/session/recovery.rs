@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
-use tracing::{info, warn, error};
+use tracing::{debug, info, warn, error};
 use crate::error::{Result, SoulBoxError};
 use crate::container::manager::ContainerManager;
 use super::{Session, SessionManager};
@@ -9,7 +9,7 @@ use super::{Session, SessionManager};
 /// Session recovery service for crash recovery and state restoration
 pub struct SessionRecoveryService {
     session_manager: Box<dyn SessionManager>,
-    container_manager: Box<dyn ContainerManager>,
+    container_manager: Box<ContainerManager>,
 }
 
 /// Recovery context for a session
@@ -42,7 +42,7 @@ pub enum RecoveryAction {
 impl SessionRecoveryService {
     pub fn new(
         session_manager: Box<dyn SessionManager>,
-        container_manager: Box<dyn ContainerManager>,
+        container_manager: Box<ContainerManager>,
     ) -> Self {
         Self {
             session_manager,
@@ -276,7 +276,7 @@ impl SessionRecoveryService {
         let runtime = session.runtime.as_ref().unwrap_or(&"python".to_string()).clone();
         
         // Create container with session's environment and working directory
-        let container_config = crate::container::ContainerConfig {
+        let container_config = bollard::container::Config {
             image: self.get_runtime_image(&runtime),
             working_dir: Some(session.working_directory.clone()),
             environment: session.environment.clone(),

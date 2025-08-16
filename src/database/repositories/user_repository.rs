@@ -6,8 +6,9 @@ use uuid::Uuid;
 
 use crate::auth::models::{User, Role};
 use crate::database::surrealdb::{
-    SurrealPool, uuid_to_record_id, record_id_to_uuid
+    SurrealPool, SurrealOperations, uuid_to_record_id, record_id_to_uuid
 };
+// use surrealdb::sql::Value;
 use crate::database::{DatabaseError, DatabaseResult, models::DbUser};
 
 /// SurrealDB 用户模型
@@ -314,7 +315,7 @@ impl UserRepository {
             .await
             .map_err(|e| DatabaseError::Query(format!("统计用户数失败: {}", e)))?;
         
-        let results: Vec<surrealdb::Value> = response
+        let results: Vec<serde_json::Value> = response
             .take(0)
             .map_err(|e| DatabaseError::Query(format!("解析统计结果失败: {}", e)))?;
         

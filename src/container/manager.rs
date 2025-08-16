@@ -7,6 +7,7 @@ use bollard::models::HostConfig;
 use tracing::{info, error};
 
 use crate::{error::Result, config::Config};
+use crate::network::{NetworkManager, SandboxNetworkConfig, NetworkError};
 use super::{SandboxContainer, ResourceLimits, NetworkConfig};
 
 #[derive(Debug, Clone)]
@@ -17,6 +18,8 @@ pub struct ContainerManager {
     containers: Arc<RwLock<HashMap<String, Arc<SandboxContainer>>>>,
     /// Global configuration
     config: Config,
+    /// Network manager for handling network configurations
+    network_manager: Arc<tokio::sync::Mutex<NetworkManager>>,
 }
 
 impl ContainerManager {
@@ -43,9 +46,11 @@ impl ContainerManager {
             docker: Arc::new(docker),
             containers: Arc::new(RwLock::new(HashMap::new())),
             config,
+            network_manager: Arc::new(tokio::sync::Mutex::new(NetworkManager::new())),
         })
     }
 
+    /// Create a sandbox container with basic network configuration (legacy method)
     pub async fn create_sandbox_container(
         &self,
         sandbox_id: &str,
@@ -54,7 +59,40 @@ impl ContainerManager {
         network_config: NetworkConfig,
         env_vars: HashMap<String, String>,
     ) -> Result<Arc<SandboxContainer>> {
+        // Convert basic NetworkConfig to SandboxNetworkConfig
+        let sandbox_network_config = SandboxNetworkConfig {
+            base_config: network_config,
+            ..Default::default()
+        };
+        
+        self.create_sandbox_container_with_network(
+            sandbox_id,
+            image,
+            resource_limits,
+            sandbox_network_config,
+            env_vars,
+        ).await
+    }
+
+    /// Create a sandbox container with enhanced network configuration
+    pub async fn create_sandbox_container_with_network(
+        &self,
+        sandbox_id: &str,
+        image: &str,
+        resource_limits: ResourceLimits,
+        network_config: SandboxNetworkConfig,
+        env_vars: HashMap<String, String>,
+    ) -> Result<Arc<SandboxContainer>> {
         info!("Creating container for sandbox: {} with image: {}", sandbox_id, image);
+        
+        // Configure network settings before container creation
+        let network_name = {
+            let mut net_mgr = self.network_manager.lock().await;
+            net_mgr.configure_sandbox_network(sandbox_id, network_config.clone()).await
+                .map_err(|e| crate::error::SoulBoxError::internal(
+                    format!("Failed to configure network: {}", e)
+                ))?
+        };
         
         // Convert environment variables to Docker format
         let docker_env: Vec<String> = env_vars
@@ -78,8 +116,44 @@ impl ContainerManager {
             // Note: These require proper cgroup setup on the host
             blkio_weight: Some(500), // Default I/O weight
             
-            // Network limits (basic setup - advanced traffic shaping requires additional tools)
-            // This is a placeholder - actual network bandwidth limiting requires tc or similar
+            // Port mappings from network configuration
+            port_bindings: if !network_config.base_config.port_mappings.is_empty() {
+                Some({
+                    let mut bindings = std::collections::HashMap::new();
+                    for port_mapping in &network_config.base_config.port_mappings {
+                        let container_port = format!("{}/{}", port_mapping.container_port, port_mapping.protocol);
+                        let host_binding = if let Some(host_port) = port_mapping.host_port {
+                            vec![bollard::models::PortBinding {
+                                host_ip: Some("127.0.0.1".to_string()),
+                                host_port: Some(host_port.to_string()),
+                            }]
+                        } else {
+                            vec![bollard::models::PortBinding {
+                                host_ip: Some("127.0.0.1".to_string()),
+                                host_port: None, // Docker will allocate
+                            }]
+                        };
+                        bindings.insert(container_port, Some(host_binding));
+                    }
+                    bindings
+                })
+            } else {
+                None
+            },
+            
+            // Network settings
+            network_mode: Some(if network_config.network_name.is_some() {
+                network_name.clone()
+            } else {
+                "bridge".to_string()
+            }),
+            
+            // DNS configuration
+            dns: if !network_config.base_config.dns_servers.is_empty() {
+                Some(network_config.base_config.dns_servers.clone())
+            } else {
+                None
+            },
             
             // Security constraints
             security_opt: Some(vec![
@@ -171,7 +245,7 @@ impl ContainerManager {
             &container_id,
             image,
             resource_limits,
-            network_config,
+            network_config.base_config,
             env_vars,
             Arc::clone(&self.docker),
         )?);
@@ -216,6 +290,14 @@ impl ContainerManager {
     }
     
     pub async fn remove_container(&self, sandbox_id: &str) -> Result<bool> {
+        // Clean up network configuration first
+        {
+            let mut net_mgr = self.network_manager.lock().await;
+            if let Err(e) = net_mgr.cleanup_sandbox_network(sandbox_id).await {
+                error!("Failed to cleanup network for sandbox {}: {}", sandbox_id, e);
+            }
+        }
+        
         let mut containers = self.containers.write().await;
         Ok(containers.remove(sandbox_id).is_some())
     }
@@ -257,6 +339,60 @@ impl ContainerManager {
         }
         
         Ok(())
+    }
+    
+    /// Get network configuration for a sandbox
+    pub async fn get_network_config(&self, sandbox_id: &str) -> Option<SandboxNetworkConfig> {
+        let net_mgr = self.network_manager.lock().await;
+        net_mgr.get_network_config(sandbox_id).cloned()
+    }
+    
+    /// Get network statistics for a sandbox
+    pub async fn get_network_stats(&self, sandbox_id: &str) -> Option<crate::network::NetworkStats> {
+        let net_mgr = self.network_manager.lock().await;
+        net_mgr.get_network_stats(sandbox_id).cloned()
+    }
+    
+    /// Update network configuration for an existing sandbox
+    pub async fn update_network_config(
+        &self,
+        sandbox_id: &str,
+        new_config: SandboxNetworkConfig,
+    ) -> Result<()> {
+        let mut net_mgr = self.network_manager.lock().await;
+        
+        // First cleanup existing configuration
+        if let Err(e) = net_mgr.cleanup_sandbox_network(sandbox_id).await {
+            error!("Failed to cleanup existing network config for sandbox {}: {}", sandbox_id, e);
+        }
+        
+        // Apply new configuration
+        net_mgr.configure_sandbox_network(sandbox_id, new_config).await
+            .map_err(|e| crate::error::SoulBoxError::internal(
+                format!("Failed to update network configuration: {}", e)
+            ))?;
+            
+        info!("Updated network configuration for sandbox {}", sandbox_id);
+        Ok(())
+    }
+    
+    /// List all active networks managed by this container manager
+    pub async fn list_active_networks(&self) -> Vec<String> {
+        let net_mgr = self.network_manager.lock().await;
+        net_mgr.list_active_networks()
+    }
+    
+    /// Get port mappings for a sandbox
+    pub async fn get_port_mappings(&self, sandbox_id: &str) -> Vec<crate::network::port_mapping::PortAllocation> {
+        let net_mgr = self.network_manager.lock().await;
+        net_mgr.port_manager.get_sandbox_ports(sandbox_id)
+    }
+}
+
+/// Convert NetworkError to SoulBoxError
+impl From<NetworkError> for crate::error::SoulBoxError {
+    fn from(error: NetworkError) -> Self {
+        crate::error::SoulBoxError::internal(format!("Network error: {}", error))
     }
 }
 

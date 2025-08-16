@@ -158,7 +158,7 @@ impl<'a> SurrealOperations<'a> {
             .take(0)
             .map_err(|e| SurrealConnectionError::Query(format!("解析查询结果失败: {}", e)))?;
         
-        let count_result: Vec<surrealdb::Value> = response
+        let count_result: Vec<serde_json::Value> = response
             .take(1)
             .map_err(|e| SurrealConnectionError::Query(format!("解析计数结果失败: {}", e)))?;
         

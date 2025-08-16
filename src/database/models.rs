@@ -1,10 +1,10 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+// Removed sqlx::FromRow since we're using SurrealDB now
 use uuid::Uuid;
 
 /// 数据库用户模型
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbUser {
     pub id: Uuid,
     pub username: String,
@@ -19,7 +19,7 @@ pub struct DbUser {
 }
 
 /// 数据库API密钥模型
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbApiKey {
     pub id: Uuid,
     pub key_hash: String,
@@ -38,7 +38,7 @@ use crate::audit::models::{AuditLog, AuditEventType, AuditSeverity, AuditResult}
 use crate::auth::models::Role;
 
 /// 数据库审计日志模型
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbAuditLog {
     pub id: Uuid,
     pub event_type: String,
@@ -82,7 +82,7 @@ pub struct DbAuditLog {
 }
 
 /// 数据库沙盒模型
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbSandbox {
     pub id: Uuid,
     pub name: String,
@@ -112,7 +112,7 @@ pub struct DbSandbox {
 }
 
 /// 数据库会话模型
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbSession {
     pub id: Uuid,
     pub user_id: Uuid,
@@ -127,7 +127,7 @@ pub struct DbSession {
 }
 
 /// 数据库租户模型
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbTenant {
     pub id: Uuid,
     pub name: String,
@@ -140,7 +140,7 @@ pub struct DbTenant {
 }
 
 /// 数据库模板模型
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbTemplate {
     pub id: Uuid,
     pub name: String,

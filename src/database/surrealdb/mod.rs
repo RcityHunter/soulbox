@@ -11,5 +11,5 @@ pub mod realtime;
 pub use config::{SurrealConfig, SurrealProtocol, SurrealPoolConfig, RetryConfig};
 pub use connection::{SurrealPool, SurrealConnection, SurrealConnectionError, SurrealResult, PoolStats};
 pub use schema::{SurrealSchema, LiveQueries};
-pub use operations::{SurrealOperations, QueryBuilder, UpdateBuilder, PaginationResult, uuid_to_record_id, record_id_to_uuid};
+pub use operations::{SurrealOperations, PaginationResult, uuid_to_record_id, record_id_to_uuid};
 pub use realtime::{RealtimeManager, RealtimeNotification, RealtimeEvent, SubscriptionManager, SubscriptionConfig};

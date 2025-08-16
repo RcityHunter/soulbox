@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::audit::models::{AuditLog, AuditEventType, AuditSeverity, AuditResult};
 use crate::database::surrealdb::{
-    SurrealPool, SurrealOperations, QueryBuilder as SurrealQueryBuilder, 
+    SurrealPool, SurrealOperations, 
     uuid_to_record_id, record_id_to_uuid, SurrealResult, SurrealConnectionError, PaginationResult
 };
 use crate::database::{DatabaseError, DatabaseResult, models::{DbAuditLog, PaginatedResult}};
@@ -131,11 +131,14 @@ impl AuditRepository {
         
         let ops = SurrealOperations::new(&conn);
         
-        let query = SurrealQueryBuilder::new("audit_logs")
-            .where_clause(format!("user_id = {}", uuid_to_record_id("users", user_id)))
-            .order_by("timestamp DESC");
+        let user_record_id = uuid_to_record_id("users", user_id);
+        let data_sql = format!(
+            "SELECT * FROM audit_logs WHERE user_id = {} ORDER BY timestamp DESC LIMIT {} START {}", 
+            user_record_id, page_size, (page - 1) * page_size
+        );
+        let count_sql = format!("SELECT count() as total FROM audit_logs WHERE user_id = {}", user_record_id);
         
-        let pagination_result = ops.find_paginated::<SurrealAuditLog>(query, page as usize, page_size as usize).await
+        let pagination_result = ops.query_paginated::<SurrealAuditLog>(&data_sql, &count_sql, page as usize, page_size as usize).await
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
         
         let mut db_audit_logs = Vec::new();
@@ -307,17 +310,4 @@ impl AuditRepository {
     }
 }
 
-// Convert DatabaseError from SurrealConnectionError
-impl From<SurrealConnectionError> for DatabaseError {
-    fn from(err: SurrealConnectionError) -> Self {
-        match err {
-            SurrealConnectionError::Connection(msg) => DatabaseError::Connection(msg),
-            SurrealConnectionError::Query(msg) => DatabaseError::Query(msg),
-            SurrealConnectionError::PoolExhausted => DatabaseError::Connection("Connection pool exhausted".to_string()),
-            SurrealConnectionError::HealthCheck(msg) => DatabaseError::Connection(format!("Health check failed: {}", msg)),
-            SurrealConnectionError::Auth(msg) => DatabaseError::Connection(format!("Authentication failed: {}", msg)),
-            SurrealConnectionError::Config(msg) => DatabaseError::Connection(format!("Configuration error: {}", msg)),
-            SurrealConnectionError::Surreal(e) => DatabaseError::Other(e.to_string()),
-        }
-    }
-}
+// Note: From<SurrealConnectionError> implementation is in database/mod.rs to avoid duplicates

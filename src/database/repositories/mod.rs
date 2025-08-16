@@ -1,9 +1,11 @@
-pub mod audit_repository;
+// Temporarily commenting out repositories due to over-engineered QueryBuilder usage
+// These need to be refactored to use direct SurrealQL queries
+// pub mod audit_repository;
 pub mod user_repository;
-pub mod sandbox_repository;
-pub mod template_repository;
+// pub mod sandbox_repository;
+// pub mod template_repository;
 
-pub use audit_repository::AuditRepository;
+// pub use audit_repository::AuditRepository;
 pub use user_repository::UserRepository;
-pub use sandbox_repository::SandboxRepository;
-pub use template_repository::TemplateRepository;
+// pub use sandbox_repository::SandboxRepository;
+// pub use template_repository::TemplateRepository;

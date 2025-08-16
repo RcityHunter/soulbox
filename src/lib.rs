@@ -16,6 +16,9 @@ pub mod cli;
 pub mod session;
 pub mod runtime;
 pub mod monitoring;
+pub mod network;
+pub mod dependencies;
+pub mod debug;
 
 // Simple implementation - Linus style
 pub mod simple;
@@ -31,6 +34,9 @@ pub use template::{TemplateManager, Template, TemplateError};
 pub use session::{Session, SessionManager, InMemorySessionManager};
 pub use runtime::{RuntimeType, RuntimeManager, RuntimeConfig, ExecutionContext};
 pub use monitoring::{MonitoringConfig, MonitoringService, PerformanceMetrics, HealthCheck, HealthStatus};
+pub use network::{NetworkManager, SandboxNetworkConfig, PortMappingManager, ProxyManager, NetworkError};
+pub use dependencies::{DependencyManager, PackageManager, PackageSpec, DependencyManifest, InstallationResult};
+pub use debug::{DebugManager, DebugConfig, DebugLanguage, DebugSession, BreakpointManager, inspector::VariableInspector};
 
 // Include generated protobuf code
 pub mod proto {

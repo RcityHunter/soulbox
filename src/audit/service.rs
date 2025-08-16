@@ -5,7 +5,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::audit::models::{AuditLog, AuditQuery, AuditStats, AuditEventType, AuditSeverity, AuditResult};
 use crate::error::{Result as SoulBoxResult, SoulBoxError};
-use crate::database::Database;
+use crate::database::SurrealPool;
 // Temporarily disabled: repositories::AuditRepository
 
 /// 审计日志服务配置
@@ -234,7 +234,7 @@ impl AuditService {
     }
     
     /// 创建带数据库支持的审计服务
-    pub fn with_database(config: AuditConfig, database: Arc<Database>) -> SoulBoxResult<Arc<Self>> {
+    pub fn with_database(config: AuditConfig, database: Arc<SurrealPool>) -> SoulBoxResult<Arc<Self>> {
         let storage = Arc::new(RwLock::new(AuditStorage::new(config.max_memory_logs)));
         let (sender, receiver) = mpsc::unbounded_channel();
         // Temporarily disabled: let repository = Arc::new(AuditRepository::new(database));
