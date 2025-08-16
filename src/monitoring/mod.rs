@@ -5,6 +5,8 @@ use crate::error::{Result, SoulBoxError};
 
 pub mod metrics;
 pub mod collectors;
+pub mod alerts;
+pub mod dashboard;
 
 /// Monitoring configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

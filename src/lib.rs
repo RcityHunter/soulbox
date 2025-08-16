@@ -19,6 +19,9 @@ pub mod monitoring;
 pub mod network;
 pub mod dependencies;
 pub mod debug;
+pub mod snapshot;
+pub mod optimization;
+pub mod recovery;
 
 // Simple implementation - Linus style
 pub mod simple;
@@ -37,6 +40,9 @@ pub use monitoring::{MonitoringConfig, MonitoringService, PerformanceMetrics, He
 pub use network::{NetworkManager, SandboxNetworkConfig, PortMappingManager, ProxyManager, NetworkError};
 pub use dependencies::{DependencyManager, PackageManager, PackageSpec, DependencyManifest, InstallationResult};
 pub use debug::{DebugManager, DebugConfig, DebugLanguage, DebugSession, BreakpointManager, inspector::VariableInspector};
+pub use snapshot::{SnapshotManager, SnapshotConfig, SnapshotType, SnapshotMetadata, SnapshotStatus};
+pub use optimization::{OptimizationManager, OptimizationConfig, PerformanceHotspot, OptimizationPriority};
+pub use recovery::{RecoveryManager, RecoveryConfig, RecoveryStrategy, RecoveryResult, ComponentHealth, HealthStatus};
 
 // Include generated protobuf code
 pub mod proto {

@@ -118,6 +118,7 @@ tonic-build = "0.10"
 reqwest = { version = "0.11", features = ["json"] }
 tokio-test = "0.4"
 criterion = { version = "0.5", features = ["html_reports"] }
+chrono = { version = "0.4", features = ["serde"] }
 
 [[bin]]
 name = "soulbox"
@@ -130,6 +131,10 @@ path = "src/bin/soulbox-agent.rs"
 [[bin]]
 name = "soulbox-cli"
 path = "src/bin/soulbox-cli.rs"
+
+[[bench]]
+name = "regression_tests"
+harness = false
 
 [profile.release]
 opt-level = 3
