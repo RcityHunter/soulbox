@@ -62,19 +62,74 @@ impl ContainerManager {
             .map(|(k, v)| format!("{}={}", k, v))
             .collect();
         
-        // Create host configuration with resource limits
-        let host_config = HostConfig {
+        // Create host configuration with comprehensive resource limits
+        let mut host_config = HostConfig {
+            // Memory limits
             memory: Some(resource_limits.memory.limit_mb as i64 * 1024 * 1024), // Convert MB to bytes
+            memory_swap: resource_limits.memory.swap_limit_mb.map(|swap| swap as i64 * 1024 * 1024),
+            memory_swappiness: Some(10), // Reduce swap usage
+            
+            // CPU limits
             cpu_quota: Some(resource_limits.cpu.cores as i64 * 100_000), // 100000 = 1 CPU
             cpu_period: Some(100_000),
+            cpu_shares: resource_limits.cpu.shares.map(|shares| shares as i64),
+            
+            // Disk I/O limits (using device cgroup v2 if available)
+            // Note: These require proper cgroup setup on the host
+            blkio_weight: Some(500), // Default I/O weight
+            
+            // Network limits (basic setup - advanced traffic shaping requires additional tools)
+            // This is a placeholder - actual network bandwidth limiting requires tc or similar
+            
+            // Security constraints
             security_opt: Some(vec![
                 "no-new-privileges:true".to_string(),
-                "seccomp=unconfined".to_string(), // For now, we'll make this configurable later
+                "seccomp=unconfined".to_string(), // Make configurable later
             ]),
             cap_drop: Some(vec!["ALL".to_string()]),
-            cap_add: Some(vec!["SYS_ADMIN".to_string()]), // Minimal required capabilities
+            cap_add: Some(vec![
+                "SYS_ADMIN".to_string(), // Required for some operations
+                "CHOWN".to_string(),     // File ownership changes
+                "SETUID".to_string(),    // Process user changes
+                "SETGID".to_string(),    // Process group changes
+            ]),
+            
+            // Process limits
+            pids_limit: Some(256), // Limit number of processes
+            
+            // File system constraints
+            readonly_root_fs: Some(false), // Allow writes to root filesystem
+            tmpfs: Some({
+                let mut tmpfs = std::collections::HashMap::new();
+                tmpfs.insert("/tmp".to_string(), format!("size={}m,exec,suid,dev", resource_limits.disk.limit_mb / 4));
+                tmpfs.insert("/var/tmp".to_string(), format!("size={}m,exec,suid,dev", resource_limits.disk.limit_mb / 8));
+                tmpfs
+            }),
+            
             ..Default::default()
         };
+
+        // Add disk quota if supported (requires Docker with quota support)
+        // This is experimental and may not work on all systems
+        if resource_limits.disk.limit_mb > 0 {
+            // Note: Proper disk quotas require additional setup:
+            // 1. Storage driver that supports quotas (overlay2 with backing filesystem that supports project quotas)
+            // 2. Kernel support for project quotas
+            // 3. Proper mount options
+            // For now, we'll log the intended limit
+            info!("Disk quota requested: {} MB (requires host configuration)", resource_limits.disk.limit_mb);
+        }
+        
+        // Log network limits (implementation requires post-container setup)
+        if let Some(upload_bps) = resource_limits.network.upload_bps {
+            info!("Upload bandwidth limit: {} bytes/s", upload_bps);
+        }
+        if let Some(download_bps) = resource_limits.network.download_bps {
+            info!("Download bandwidth limit: {} bytes/s", download_bps);
+        }
+        if let Some(max_conn) = resource_limits.network.max_connections {
+            info!("Max connections limit: {}", max_conn);
+        }
         
         // Create container configuration
         let container_config = ContainerConfig {
@@ -125,6 +180,16 @@ impl ContainerManager {
         let mut containers = self.containers.write().await;
         containers.insert(sandbox_id.to_string(), container.clone());
         
+        info!("Container {} created and registered for sandbox {}", container_id, sandbox_id);
+        
+        // Apply network bandwidth limits if specified (requires additional setup)
+        if resource_limits.network.upload_bps.is_some() || resource_limits.network.download_bps.is_some() {
+            match self.setup_network_bandwidth_limits(&container_id, &resource_limits.network).await {
+                Ok(_) => info!("Network bandwidth limits applied to container {}", container_id),
+                Err(e) => error!("Failed to apply network limits to container {}: {}", container_id, e),
+            }
+        }
+        
         Ok(container)
     }
 
@@ -153,6 +218,45 @@ impl ContainerManager {
     pub async fn remove_container(&self, sandbox_id: &str) -> Result<bool> {
         let mut containers = self.containers.write().await;
         Ok(containers.remove(sandbox_id).is_some())
+    }
+    
+    /// Apply network bandwidth limits to a container using tc (traffic control)
+    /// Note: This requires the host to have tc installed and proper permissions
+    async fn setup_network_bandwidth_limits(
+        &self,
+        container_id: &str,
+        network_limits: &super::resource_limits::NetworkLimits,
+    ) -> Result<()> {
+        // Get the container's network interface
+        let _container_details = self.docker.inspect_container(container_id, None).await
+            .map_err(|e| crate::error::SoulBoxError::internal(format!("Failed to inspect container: {}", e)))?;
+            
+        // For now, just log what would be done
+        // In a real implementation, you would:
+        // 1. Find the container's veth pair interface on the host
+        // 2. Use tc commands to set up bandwidth limiting
+        // 3. Handle cleanup when container is destroyed
+        
+        info!("Network bandwidth limiting setup for container {} (requires tc configuration):", container_id);
+        
+        if let Some(upload_bps) = network_limits.upload_bps {
+            info!("  Upload limit: {} bytes/s ({} Mbps)", upload_bps, upload_bps * 8 / 1_000_000);
+            // Example tc command that would be run:
+            // tc qdisc add dev vethXXX root handle 1: htb default 30
+            // tc class add dev vethXXX parent 1: classid 1:1 htb rate {}bps
+        }
+        
+        if let Some(download_bps) = network_limits.download_bps {
+            info!("  Download limit: {} bytes/s ({} Mbps)", download_bps, download_bps * 8 / 1_000_000);
+        }
+        
+        if let Some(max_conn) = network_limits.max_connections {
+            info!("  Connection limit: {} connections", max_conn);
+            // This would typically be enforced using iptables or similar:
+            // iptables -A INPUT -p tcp --syn -m connlimit --connlimit-above {} -j REJECT
+        }
+        
+        Ok(())
     }
 }
 

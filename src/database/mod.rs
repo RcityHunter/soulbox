@@ -3,9 +3,19 @@ pub mod connection;
 pub mod models;
 pub mod repositories;
 pub mod migrations;
+pub mod surrealdb;
 
+// Legacy exports for backward compatibility
 pub use config::{DatabaseConfig, DatabaseType, PoolConfig};
 pub use connection::{Database, DatabasePool};
+
+// New SurrealDB exports
+pub use surrealdb::{
+    SurrealConfig, SurrealProtocol, SurrealPool, SurrealConnection,
+    SurrealOperations, SurrealSchema, LiveQueries,
+    SurrealResult, SurrealConnectionError
+};
+
 pub use repositories::*;
 
 /// 数据库错误类型
@@ -36,6 +46,8 @@ pub enum DatabaseError {
     Other(String),
 }
 
+// Maintain compatibility with the old sqlx-based code
+#[cfg(feature = "sqlx-compat")]
 impl From<sqlx::Error> for DatabaseError {
     fn from(err: sqlx::Error) -> Self {
         match err {
@@ -53,4 +65,77 @@ impl From<sqlx::Error> for DatabaseError {
     }
 }
 
+// Convert from SurrealDB connection errors
+impl From<SurrealConnectionError> for DatabaseError {
+    fn from(err: SurrealConnectionError) -> Self {
+        match err {
+            SurrealConnectionError::Connection(msg) => DatabaseError::Connection(msg),
+            SurrealConnectionError::Query(msg) => DatabaseError::Query(msg),
+            SurrealConnectionError::PoolExhausted => DatabaseError::Connection("Connection pool exhausted".to_string()),
+            SurrealConnectionError::HealthCheck(msg) => DatabaseError::Connection(format!("Health check failed: {}", msg)),
+            SurrealConnectionError::Auth(msg) => DatabaseError::Connection(format!("Authentication failed: {}", msg)),
+            SurrealConnectionError::Config(msg) => DatabaseError::Connection(format!("Configuration error: {}", msg)),
+            SurrealConnectionError::Surreal(e) => DatabaseError::Other(e.to_string()),
+        }
+    }
+}
+
 pub type DatabaseResult<T> = Result<T, DatabaseError>;
+
+/// Database abstraction that can work with both legacy sqlx and new SurrealDB
+pub enum DatabaseBackend {
+    #[cfg(feature = "sqlx-compat")]
+    Legacy(Database),
+    Surreal(std::sync::Arc<SurrealPool>),
+}
+
+impl DatabaseBackend {
+    /// Create a new SurrealDB backend
+    pub async fn new_surreal(config: SurrealConfig) -> DatabaseResult<Self> {
+        let pool = SurrealPool::new(config).await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        Ok(Self::Surreal(std::sync::Arc::new(pool)))
+    }
+    
+    /// Create legacy sqlx backend (for backward compatibility)
+    #[cfg(feature = "sqlx-compat")]
+    pub async fn new_legacy(config: DatabaseConfig) -> DatabaseResult<Self> {
+        let db = Database::new(config).await?;
+        Ok(Self::Legacy(db))
+    }
+    
+    /// Get SurrealDB pool if using SurrealDB backend
+    pub fn surreal_pool(&self) -> Option<std::sync::Arc<SurrealPool>> {
+        match self {
+            Self::Surreal(pool) => Some(pool.clone()),
+            #[cfg(feature = "sqlx-compat")]
+            Self::Legacy(_) => None,
+        }
+    }
+    
+    /// Get legacy database if using legacy backend
+    #[cfg(feature = "sqlx-compat")]
+    pub fn legacy_db(&self) -> Option<&Database> {
+        match self {
+            Self::Legacy(db) => Some(db),
+            Self::Surreal(_) => None,
+        }
+    }
+    
+    /// Health check for the database backend
+    pub async fn health_check(&self) -> DatabaseResult<()> {
+        match self {
+            Self::Surreal(pool) => {
+                let conn = pool.get_connection().await
+                    .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+                // Simple health check query
+                let ops = SurrealOperations::new(&conn);
+                ops.query::<surrealdb::Value>("SELECT 1 as health_check").await
+                    .map_err(|e| DatabaseError::Query(e.to_string()))?;
+                Ok(())
+            }
+            #[cfg(feature = "sqlx-compat")]
+            Self::Legacy(db) => db.health_check().await,
+        }
+    }
+}

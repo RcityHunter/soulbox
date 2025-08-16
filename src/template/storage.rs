@@ -326,59 +326,8 @@ impl TemplateStorage {
         fs::write(metadata_path, metadata_json).await
             .map_err(|e| TemplateError::FileError(format!("Failed to write metadata: {}", e)))?;
 
-        // Store individual files with security checks
-        let files_dir = template_dir.join("files");
-        if !template.files.is_empty() {
-            fs::create_dir_all(&files_dir).await
-                .map_err(|e| TemplateError::FileError(format!("Failed to create files directory: {}", e)))?;
-
-            // Calculate total file size for validation
-            let mut total_size: u64 = 0;
-            const MAX_FILE_SIZE: u64 = 1024 * 1024; // 1MB per file
-            const MAX_TOTAL_SIZE: u64 = 10 * 1024 * 1024; // 10MB total
-
-            for (file_path, content) in &template.files {
-                // Security validation: Check file size
-                let content_size = content.len() as u64;
-                if content_size > MAX_FILE_SIZE {
-                    return Err(TemplateError::SecurityViolation(
-                        format!("File '{}' exceeds maximum size of 1MB", file_path)
-                    ).into());
-                }
-
-                total_size += content_size;
-                if total_size > MAX_TOTAL_SIZE {
-                    return Err(TemplateError::SecurityViolation(
-                        "Total file size exceeds maximum limit of 10MB".to_string()
-                    ).into());
-                }
-
-                // Security validation: Prevent path traversal
-                if self.is_unsafe_path(file_path)? {
-                    return Err(TemplateError::SecurityViolation(
-                        format!("Invalid file path detected: '{}'", file_path)
-                    ).into());
-                }
-
-                let full_path = files_dir.join(file_path);
-                
-                // Double-check that the resolved path is still within files_dir
-                if !self.is_path_within_directory(&full_path, &files_dir)? {
-                    return Err(TemplateError::SecurityViolation(
-                        format!("File path '{}' attempts to escape template directory", file_path)
-                    ).into());
-                }
-                
-                // Create parent directories if needed
-                if let Some(parent) = full_path.parent() {
-                    fs::create_dir_all(parent).await
-                        .map_err(|e| TemplateError::FileError(format!("Failed to create parent directory: {}", e)))?;
-                }
-
-                fs::write(full_path, content).await
-                    .map_err(|e| TemplateError::FileError(format!("Failed to write file {}: {}", file_path, e)))?;
-            }
-        }
+        // Note: Actual file content storage is handled by TemplateFileStorage
+        // This method only stores the template metadata and file references
 
         Ok(())
     }

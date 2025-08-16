@@ -261,7 +261,7 @@ fn display_logs(logs: &[LogEntry], args: &LogsArgs) -> Result<()> {
     Ok(())
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct LogEntry {
     id: String,
     timestamp: chrono::DateTime<chrono::Utc>,

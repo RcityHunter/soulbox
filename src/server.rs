@@ -2,6 +2,7 @@ use crate::api::auth::{auth_routes, AuthState};
 use crate::api::audit::{audit_routes, AuditState};
 use crate::api::permissions::permission_routes;
 use crate::api::templates::{template_routes, TemplateState};
+use crate::api::files::file_routes;
 use crate::audit::{AuditConfig, AuditMiddleware, AuditService};
 use crate::auth::middleware::{AuthMiddleware, AuthExtractor};
 use crate::auth::models::Permission;
@@ -177,6 +178,9 @@ fn create_app(state: AppState) -> Router {
     if let Some(template_router) = template_router {
         app = app.nest("/api/v1", template_router);
     }
+    
+    // Add file system routes
+    app = app.nest("/api/v1", file_routes());
 
     app
         // 全局中间件

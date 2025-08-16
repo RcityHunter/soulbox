@@ -1,99 +1,82 @@
 use chrono::{DateTime, Utc};
-use sqlx::{QueryBuilder, Row};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{info, error};
+use tracing::{info, error, debug};
 use uuid::Uuid;
 
-use crate::database::{Database, DatabaseError, DatabasePool, DatabaseResult, models::{DbSandbox, PaginatedResult}};
+use crate::database::surrealdb::{
+    SurrealPool, SurrealOperations, QueryBuilder as SurrealQueryBuilder, UpdateBuilder, 
+    uuid_to_record_id, record_id_to_uuid, SurrealResult, SurrealConnectionError, PaginationResult
+};
+use crate::database::{DatabaseError, DatabaseResult, models::{DbSandbox, PaginatedResult}};
+
+/// SurrealDB 沙盒模型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SurrealSandbox {
+    pub id: String, // SurrealDB record ID
+    pub name: String,
+    pub runtime_type: String,
+    pub template: String,
+    pub status: String,
+    pub owner_id: String,
+    pub tenant_id: Option<String>,
+    pub cpu_limit: Option<i64>,
+    pub memory_limit: Option<i64>,
+    pub disk_limit: Option<i64>,
+    pub container_id: Option<String>,
+    pub vm_id: Option<String>,
+    pub ip_address: Option<String>,
+    pub port_mappings: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub stopped_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<DateTime<Utc>>,
+}
 
 /// 沙盒仓库
 pub struct SandboxRepository {
-    db: Arc<Database>,
+    pool: Arc<SurrealPool>,
 }
 
 impl SandboxRepository {
-    pub fn new(db: Arc<Database>) -> Self {
-        Self { db }
+    pub fn new(pool: Arc<SurrealPool>) -> Self {
+        Self { pool }
     }
     
     /// 创建沙盒
     pub async fn create(&self, sandbox: &DbSandbox) -> DatabaseResult<()> {
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                sqlx::query!(
-                    r#"
-                    INSERT INTO sandboxes (
-                        id, name, runtime_type, template, status, owner_id, tenant_id,
-                        cpu_limit, memory_limit, disk_limit,
-                        container_id, vm_id, ip_address, port_mappings,
-                        created_at, updated_at, expires_at
-                    ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
-                    )
-                    "#,
-                    sandbox.id,
-                    sandbox.name,
-                    sandbox.runtime_type,
-                    sandbox.template,
-                    sandbox.status,
-                    sandbox.owner_id,
-                    sandbox.tenant_id,
-                    sandbox.cpu_limit,
-                    sandbox.memory_limit,
-                    sandbox.disk_limit,
-                    sandbox.container_id,
-                    sandbox.vm_id,
-                    sandbox.ip_address,
-                    sandbox.port_mappings,
-                    sandbox.created_at,
-                    sandbox.updated_at,
-                    sandbox.expires_at
-                )
-                .execute(pool)
-                .await?;
-            }
-            DatabasePool::Sqlite(pool) => {
-                let id = sandbox.id.to_string();
-                let owner_id = sandbox.owner_id.to_string();
-                let tenant_id = sandbox.tenant_id.map(|t| t.to_string());
-                let created_at = sandbox.created_at.to_rfc3339();
-                let updated_at = sandbox.updated_at.to_rfc3339();
-                let expires_at = sandbox.expires_at.map(|e| e.to_rfc3339());
-                let port_mappings = sandbox.port_mappings.as_ref().map(|p| p.to_string());
-                
-                sqlx::query!(
-                    r#"
-                    INSERT INTO sandboxes (
-                        id, name, runtime_type, template, status, owner_id, tenant_id,
-                        cpu_limit, memory_limit, disk_limit,
-                        container_id, vm_id, ip_address, port_mappings,
-                        created_at, updated_at, expires_at
-                    ) VALUES (
-                        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
-                    )
-                    "#,
-                    id,
-                    sandbox.name,
-                    sandbox.runtime_type,
-                    sandbox.template,
-                    sandbox.status,
-                    owner_id,
-                    tenant_id,
-                    sandbox.cpu_limit,
-                    sandbox.memory_limit,
-                    sandbox.disk_limit,
-                    sandbox.container_id,
-                    sandbox.vm_id,
-                    sandbox.ip_address,
-                    port_mappings,
-                    created_at,
-                    updated_at,
-                    expires_at
-                )
-                .execute(pool)
-                .await?;
-            }
-        }
+        debug!("创建沙盒: {} ({})", sandbox.name, sandbox.id);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let surreal_sandbox = SurrealSandbox {
+            id: uuid_to_record_id("sandboxes", sandbox.id),
+            name: sandbox.name.clone(),
+            runtime_type: sandbox.runtime_type.clone(),
+            template: sandbox.template.clone(),
+            status: sandbox.status.clone(),
+            owner_id: uuid_to_record_id("users", sandbox.owner_id),
+            tenant_id: sandbox.tenant_id.map(|id| uuid_to_record_id("tenants", id)),
+            cpu_limit: sandbox.cpu_limit,
+            memory_limit: sandbox.memory_limit,
+            disk_limit: sandbox.disk_limit,
+            container_id: sandbox.container_id.clone(),
+            vm_id: sandbox.vm_id.clone(),
+            ip_address: sandbox.ip_address.clone(),
+            port_mappings: sandbox.port_mappings.clone(),
+            created_at: sandbox.created_at,
+            updated_at: sandbox.updated_at,
+            started_at: sandbox.started_at,
+            stopped_at: sandbox.stopped_at,
+            expires_at: sandbox.expires_at,
+        };
+        
+        ops.create("sandboxes", &surreal_sandbox).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
         
         info!("Created sandbox: {} ({})", sandbox.name, sandbox.id);
         Ok(())
@@ -101,143 +84,161 @@ impl SandboxRepository {
     
     /// 根据ID查找沙盒
     pub async fn find_by_id(&self, id: Uuid) -> DatabaseResult<Option<DbSandbox>> {
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                let sandbox = sqlx::query_as!(
-                    DbSandbox,
-                    "SELECT * FROM sandboxes WHERE id = $1",
-                    id
-                )
-                .fetch_optional(pool)
-                .await?;
-                
-                Ok(sandbox)
+        debug!("根据ID查找沙盒: {}", id);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        match ops.find_by_id::<SurrealSandbox>("sandboxes", &id.to_string()).await {
+            Ok(Some(surreal_sandbox)) => {
+                let db_sandbox = self.surreal_to_db_sandbox(surreal_sandbox)?;
+                Ok(Some(db_sandbox))
             }
-            DatabasePool::Sqlite(pool) => {
-                let id_str = id.to_string();
-                let sandbox = sqlx::query_as!(
-                    DbSandbox,
-                    "SELECT * FROM sandboxes WHERE id = ?1",
-                    id_str
-                )
-                .fetch_optional(pool)
-                .await?;
-                
-                Ok(sandbox)
-            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(DatabaseError::Query(e.to_string())),
         }
+    }
+    
+    /// 根据容器ID查找沙盒
+    pub async fn find_by_container_id(&self, container_id: &str) -> DatabaseResult<Option<DbSandbox>> {
+        debug!("根据容器ID查找沙盒: {}", container_id);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let query = SurrealQueryBuilder::new("sandboxes")
+            .where_clause(format!("container_id = '{}'", container_id));
+        
+        match ops.find_where::<SurrealSandbox>(query).await {
+            Ok(mut sandboxes) => {
+                if let Some(surreal_sandbox) = sandboxes.pop() {
+                    let db_sandbox = self.surreal_to_db_sandbox(surreal_sandbox)?;
+                    Ok(Some(db_sandbox))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(e) => Err(DatabaseError::Query(e.to_string())),
+        }
+    }
+    
+    /// 根据VM ID查找沙盒
+    pub async fn find_by_vm_id(&self, vm_id: &str) -> DatabaseResult<Option<DbSandbox>> {
+        debug!("根据VM ID查找沙盒: {}", vm_id);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let query = SurrealQueryBuilder::new("sandboxes")
+            .where_clause(format!("vm_id = '{}'", vm_id));
+        
+        match ops.find_where::<SurrealSandbox>(query).await {
+            Ok(mut sandboxes) => {
+                if let Some(surreal_sandbox) = sandboxes.pop() {
+                    let db_sandbox = self.surreal_to_db_sandbox(surreal_sandbox)?;
+                    Ok(Some(db_sandbox))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(e) => Err(DatabaseError::Query(e.to_string())),
+        }
+    }
+    
+    /// 更新沙盒
+    pub async fn update(&self, sandbox: &DbSandbox) -> DatabaseResult<()> {
+        debug!("更新沙盒: {} ({})", sandbox.name, sandbox.id);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let mut update = UpdateBuilder::new("sandboxes")
+            .set(format!("name = '{}'", sandbox.name))
+            .set(format!("runtime_type = '{}'", sandbox.runtime_type))
+            .set(format!("template = '{}'", sandbox.template))
+            .set(format!("status = '{}'", sandbox.status))
+            .set("updated_at = time::now()")
+            .where_clause(format!("id = {}", uuid_to_record_id("sandboxes", sandbox.id)));
+        
+        // 可选字段更新
+        if let Some(tenant_id) = sandbox.tenant_id {
+            update = update.set(format!("tenant_id = {}", uuid_to_record_id("tenants", tenant_id)));
+        }
+        
+        if let Some(cpu_limit) = sandbox.cpu_limit {
+            update = update.set(format!("cpu_limit = {}", cpu_limit));
+        }
+        
+        if let Some(memory_limit) = sandbox.memory_limit {
+            update = update.set(format!("memory_limit = {}", memory_limit));
+        }
+        
+        if let Some(disk_limit) = sandbox.disk_limit {
+            update = update.set(format!("disk_limit = {}", disk_limit));
+        }
+        
+        if let Some(ref container_id) = sandbox.container_id {
+            update = update.set(format!("container_id = '{}'", container_id));
+        }
+        
+        if let Some(ref vm_id) = sandbox.vm_id {
+            update = update.set(format!("vm_id = '{}'", vm_id));
+        }
+        
+        if let Some(ref ip_address) = sandbox.ip_address {
+            update = update.set(format!("ip_address = '{}'", ip_address));
+        }
+        
+        if let Some(started_at) = sandbox.started_at {
+            update = update.set(format!("started_at = '{}'", started_at.to_rfc3339()));
+        }
+        
+        if let Some(stopped_at) = sandbox.stopped_at {
+            update = update.set(format!("stopped_at = '{}'", stopped_at.to_rfc3339()));
+        }
+        
+        if let Some(expires_at) = sandbox.expires_at {
+            update = update.set(format!("expires_at = '{}'", expires_at.to_rfc3339()));
+        }
+        
+        let results: Vec<SurrealSandbox> = ops.update_where(update).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        
+        if results.is_empty() {
+            return Err(DatabaseError::NotFound);
+        }
+        
+        info!("Updated sandbox: {} ({})", sandbox.name, sandbox.id);
+        Ok(())
     }
     
     /// 更新沙盒状态
     pub async fn update_status(&self, id: Uuid, status: &str) -> DatabaseResult<()> {
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                let result = sqlx::query!(
-                    "UPDATE sandboxes SET status = $2, updated_at = NOW() WHERE id = $1",
-                    id,
-                    status
-                )
-                .execute(pool)
-                .await?;
-                
-                if result.rows_affected() == 0 {
-                    return Err(DatabaseError::NotFound);
-                }
-            }
-            DatabasePool::Sqlite(pool) => {
-                let id_str = id.to_string();
-                let result = sqlx::query!(
-                    "UPDATE sandboxes SET status = ?2, updated_at = datetime('now') WHERE id = ?1",
-                    id_str,
-                    status
-                )
-                .execute(pool)
-                .await?;
-                
-                if result.rows_affected() == 0 {
-                    return Err(DatabaseError::NotFound);
-                }
-            }
-        }
+        debug!("更新沙盒状态: {} -> {}", id, status);
         
-        Ok(())
-    }
-    
-    /// 更新沙盒运行时信息
-    pub async fn update_runtime_info(
-        &self,
-        id: Uuid,
-        container_id: Option<&str>,
-        vm_id: Option<&str>,
-        ip_address: Option<&str>,
-    ) -> DatabaseResult<()> {
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                let result = sqlx::query!(
-                    r#"
-                    UPDATE sandboxes 
-                    SET container_id = $2, vm_id = $3, ip_address = $4, 
-                        started_at = NOW(), updated_at = NOW()
-                    WHERE id = $1
-                    "#,
-                    id,
-                    container_id,
-                    vm_id,
-                    ip_address
-                )
-                .execute(pool)
-                .await?;
-                
-                if result.rows_affected() == 0 {
-                    return Err(DatabaseError::NotFound);
-                }
-            }
-            DatabasePool::Sqlite(pool) => {
-                let id_str = id.to_string();
-                let result = sqlx::query!(
-                    r#"
-                    UPDATE sandboxes 
-                    SET container_id = ?2, vm_id = ?3, ip_address = ?4, 
-                        started_at = datetime('now'), updated_at = datetime('now')
-                    WHERE id = ?1
-                    "#,
-                    id_str,
-                    container_id,
-                    vm_id,
-                    ip_address
-                )
-                .execute(pool)
-                .await?;
-                
-                if result.rows_affected() == 0 {
-                    return Err(DatabaseError::NotFound);
-                }
-            }
-        }
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
         
-        Ok(())
-    }
-    
-    /// 记录沙盒停止时间
-    pub async fn mark_stopped(&self, id: Uuid) -> DatabaseResult<()> {
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                sqlx::query!(
-                    "UPDATE sandboxes SET stopped_at = NOW(), updated_at = NOW() WHERE id = $1",
-                    id
-                )
-                .execute(pool)
-                .await?;
-            }
-            DatabasePool::Sqlite(pool) => {
-                let id_str = id.to_string();
-                sqlx::query!(
-                    "UPDATE sandboxes SET stopped_at = datetime('now'), updated_at = datetime('now') WHERE id = ?1",
-                    id_str
-                )
-                .execute(pool)
-                .await?;
-            }
+        let ops = SurrealOperations::new(&conn);
+        
+        let update = UpdateBuilder::new("sandboxes")
+            .set(format!("status = '{}'", status))
+            .set("updated_at = time::now()")
+            .where_clause(format!("id = {}", uuid_to_record_id("sandboxes", id)));
+        
+        let results: Vec<SurrealSandbox> = ops.update_where(update).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        
+        if results.is_empty() {
+            return Err(DatabaseError::NotFound);
         }
         
         Ok(())
@@ -245,32 +246,18 @@ impl SandboxRepository {
     
     /// 删除沙盒
     pub async fn delete(&self, id: Uuid) -> DatabaseResult<()> {
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                let result = sqlx::query!(
-                    "DELETE FROM sandboxes WHERE id = $1",
-                    id
-                )
-                .execute(pool)
-                .await?;
-                
-                if result.rows_affected() == 0 {
-                    return Err(DatabaseError::NotFound);
-                }
-            }
-            DatabasePool::Sqlite(pool) => {
-                let id_str = id.to_string();
-                let result = sqlx::query!(
-                    "DELETE FROM sandboxes WHERE id = ?1",
-                    id_str
-                )
-                .execute(pool)
-                .await?;
-                
-                if result.rows_affected() == 0 {
-                    return Err(DatabaseError::NotFound);
-                }
-            }
+        debug!("删除沙盒: {}", id);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let deleted = ops.delete("sandboxes", &id.to_string()).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        
+        if !deleted {
+            return Err(DatabaseError::NotFound);
         }
         
         info!("Deleted sandbox: {}", id);
@@ -285,183 +272,200 @@ impl SandboxRepository {
         page: u32,
         page_size: u32,
     ) -> DatabaseResult<PaginatedResult<DbSandbox>> {
-        let offset = ((page - 1) * page_size) as i64;
-        let limit = page_size as i64;
+        debug!("列出用户 {} 的沙盒，状态: {:?}, 页码: {}, 大小: {}", owner_id, status, page, page_size);
         
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                let mut query_builder = QueryBuilder::new(
-                    "SELECT * FROM sandboxes WHERE owner_id = "
-                );
-                query_builder.push_bind(owner_id);
-                
-                if let Some(status) = status {
-                    query_builder.push(" AND status = ");
-                    query_builder.push_bind(status);
-                }
-                
-                query_builder.push(" ORDER BY created_at DESC LIMIT ");
-                query_builder.push_bind(limit);
-                query_builder.push(" OFFSET ");
-                query_builder.push_bind(offset);
-                
-                let sandboxes = query_builder
-                    .build_query_as::<DbSandbox>()
-                    .fetch_all(pool)
-                    .await?;
-                
-                // 计算总数
-                let mut count_builder = QueryBuilder::new(
-                    "SELECT COUNT(*) as count FROM sandboxes WHERE owner_id = "
-                );
-                count_builder.push_bind(owner_id);
-                
-                if let Some(status) = status {
-                    count_builder.push(" AND status = ");
-                    count_builder.push_bind(status);
-                }
-                
-                let total = count_builder
-                    .build()
-                    .fetch_one(pool)
-                    .await?
-                    .get::<i64, _>("count");
-                
-                Ok(PaginatedResult::new(sandboxes, total, page, page_size))
-            }
-            DatabasePool::Sqlite(pool) => {
-                let owner_id_str = owner_id.to_string();
-                let mut query_builder = QueryBuilder::new(
-                    "SELECT * FROM sandboxes WHERE owner_id = "
-                );
-                query_builder.push_bind(&owner_id_str);
-                
-                if let Some(status) = status {
-                    query_builder.push(" AND status = ");
-                    query_builder.push_bind(status);
-                }
-                
-                query_builder.push(" ORDER BY created_at DESC LIMIT ");
-                query_builder.push_bind(limit);
-                query_builder.push(" OFFSET ");
-                query_builder.push_bind(offset);
-                
-                let sandboxes = query_builder
-                    .build_query_as::<DbSandbox>()
-                    .fetch_all(pool)
-                    .await?;
-                
-                // 计算总数
-                let mut count_builder = QueryBuilder::new(
-                    "SELECT COUNT(*) as count FROM sandboxes WHERE owner_id = "
-                );
-                count_builder.push_bind(&owner_id_str);
-                
-                if let Some(status) = status {
-                    count_builder.push(" AND status = ");
-                    count_builder.push_bind(status);
-                }
-                
-                let total = count_builder
-                    .build()
-                    .fetch_one(pool)
-                    .await?
-                    .get::<i64, _>("count");
-                
-                Ok(PaginatedResult::new(sandboxes, total, page, page_size))
-            }
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let mut query = SurrealQueryBuilder::new("sandboxes")
+            .where_clause(format!("owner_id = {}", uuid_to_record_id("users", owner_id)))
+            .order_by("created_at DESC");
+        
+        if let Some(status) = status {
+            query = query.where_clause(format!("status = '{}'", status));
         }
+        
+        let pagination_result = ops.find_paginated::<SurrealSandbox>(query, page as usize, page_size as usize).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        
+        let mut db_sandboxes = Vec::new();
+        for surreal_sandbox in pagination_result.items {
+            db_sandboxes.push(self.surreal_to_db_sandbox(surreal_sandbox)?);
+        }
+        
+        Ok(PaginatedResult::new(
+            db_sandboxes,
+            pagination_result.total,
+            pagination_result.page as u32,
+            pagination_result.page_size as u32,
+        ))
     }
     
     /// 列出租户的沙盒
     pub async fn list_by_tenant(
         &self,
         tenant_id: Uuid,
+        status: Option<&str>,
         page: u32,
         page_size: u32,
     ) -> DatabaseResult<PaginatedResult<DbSandbox>> {
-        let offset = ((page - 1) * page_size) as i64;
-        let limit = page_size as i64;
+        debug!("列出租户 {} 的沙盒，状态: {:?}, 页码: {}, 大小: {}", tenant_id, status, page, page_size);
         
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                let sandboxes = sqlx::query_as!(
-                    DbSandbox,
-                    r#"
-                    SELECT * FROM sandboxes 
-                    WHERE tenant_id = $1 
-                    ORDER BY created_at DESC 
-                    LIMIT $2 OFFSET $3
-                    "#,
-                    tenant_id,
-                    limit,
-                    offset
-                )
-                .fetch_all(pool)
-                .await?;
-                
-                let total = sqlx::query!(
-                    "SELECT COUNT(*) as count FROM sandboxes WHERE tenant_id = $1",
-                    tenant_id
-                )
-                .fetch_one(pool)
-                .await?
-                .count
-                .unwrap_or(0);
-                
-                Ok(PaginatedResult::new(sandboxes, total, page, page_size))
-            }
-            DatabasePool::Sqlite(pool) => {
-                let tenant_id_str = tenant_id.to_string();
-                let sandboxes = sqlx::query_as!(
-                    DbSandbox,
-                    r#"
-                    SELECT * FROM sandboxes 
-                    WHERE tenant_id = ?1 
-                    ORDER BY created_at DESC 
-                    LIMIT ?2 OFFSET ?3
-                    "#,
-                    tenant_id_str,
-                    limit,
-                    offset
-                )
-                .fetch_all(pool)
-                .await?;
-                
-                let total = sqlx::query!(
-                    "SELECT COUNT(*) as count FROM sandboxes WHERE tenant_id = ?1",
-                    tenant_id_str
-                )
-                .fetch_one(pool)
-                .await?
-                .count;
-                
-                Ok(PaginatedResult::new(sandboxes, total, page, page_size))
-            }
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let mut query = SurrealQueryBuilder::new("sandboxes")
+            .where_clause(format!("tenant_id = {}", uuid_to_record_id("tenants", tenant_id)))
+            .order_by("created_at DESC");
+        
+        if let Some(status) = status {
+            query = query.where_clause(format!("status = '{}'", status));
         }
+        
+        let pagination_result = ops.find_paginated::<SurrealSandbox>(query, page as usize, page_size as usize).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        
+        let mut db_sandboxes = Vec::new();
+        for surreal_sandbox in pagination_result.items {
+            db_sandboxes.push(self.surreal_to_db_sandbox(surreal_sandbox)?);
+        }
+        
+        Ok(PaginatedResult::new(
+            db_sandboxes,
+            pagination_result.total,
+            pagination_result.page as u32,
+            pagination_result.page_size as u32,
+        ))
     }
     
-    /// 清理过期的沙盒
-    pub async fn cleanup_expired(&self) -> DatabaseResult<u64> {
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                let result = sqlx::query!(
-                    "DELETE FROM sandboxes WHERE expires_at < NOW() AND status != 'stopped'",
-                )
-                .execute(pool)
-                .await?;
-                
-                Ok(result.rows_affected())
-            }
-            DatabasePool::Sqlite(pool) => {
-                let result = sqlx::query!(
-                    "DELETE FROM sandboxes WHERE expires_at < datetime('now') AND status != 'stopped'",
-                )
-                .execute(pool)
-                .await?;
-                
-                Ok(result.rows_affected())
-            }
+    /// 统计用户的沙盒数量
+    pub async fn count_by_owner(&self, owner_id: Uuid, status: Option<&str>) -> DatabaseResult<i64> {
+        debug!("统计用户 {} 的沙盒数量，状态: {:?}", owner_id, status);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let mut query = SurrealQueryBuilder::new("sandboxes")
+            .select("count()")
+            .where_clause(format!("owner_id = {}", uuid_to_record_id("users", owner_id)));
+        
+        if let Some(status) = status {
+            query = query.where_clause(format!("status = '{}'", status));
+        }
+        
+        let results: Vec<surrealdb::Value> = ops.find_where(query).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        
+        let count = if let Some(count_value) = results.first() {
+            count_value.as_int() as i64
+        } else {
+            0
+        };
+        
+        Ok(count)
+    }
+    
+    /// 清理过期沙盒
+    pub async fn cleanup_expired(&self) -> DatabaseResult<i64> {
+        debug!("清理过期沙盒");
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        // 查找过期沙盒
+        let query = SurrealQueryBuilder::new("sandboxes")
+            .where_clause("expires_at < time::now()")
+            .where_clause("status != 'stopped'");
+        
+        let expired_sandboxes: Vec<SurrealSandbox> = ops.find_where(query).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        
+        let count = expired_sandboxes.len() as i64;
+        
+        if count > 0 {
+            // 更新过期沙盒状态
+            let update = UpdateBuilder::new("sandboxes")
+                .set("status = 'stopped'")
+                .set("stopped_at = time::now()")
+                .set("updated_at = time::now()")
+                .where_clause("expires_at < time::now()")
+                .where_clause("status != 'stopped'");
+            
+            ops.update_where::<SurrealSandbox>(update).await
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            
+            info!("清理了 {} 个过期沙盒", count);
+        }
+        
+        Ok(count)
+    }
+    
+    /// 将 SurrealSandbox 转换为 DbSandbox
+    fn surreal_to_db_sandbox(&self, surreal_sandbox: SurrealSandbox) -> DatabaseResult<DbSandbox> {
+        let id_str = surreal_sandbox.id.split(':').last()
+            .ok_or_else(|| DatabaseError::Other("Invalid sandbox record ID format".to_string()))?;
+        
+        let id = id_str.parse::<Uuid>()
+            .map_err(|e| DatabaseError::Other(format!("Failed to parse sandbox UUID: {}", e)))?;
+        
+        let owner_id_str = surreal_sandbox.owner_id.split(':').last()
+            .ok_or_else(|| DatabaseError::Other("Invalid owner record ID format".to_string()))?;
+        
+        let owner_id = owner_id_str.parse::<Uuid>()
+            .map_err(|e| DatabaseError::Other(format!("Failed to parse owner UUID: {}", e)))?;
+        
+        let tenant_id = if let Some(tenant_record_id) = &surreal_sandbox.tenant_id {
+            let tenant_id_str = tenant_record_id.split(':').last()
+                .ok_or_else(|| DatabaseError::Other("Invalid tenant record ID format".to_string()))?;
+            Some(tenant_id_str.parse::<Uuid>()
+                .map_err(|e| DatabaseError::Other(format!("Failed to parse tenant UUID: {}", e)))?)
+        } else {
+            None
+        };
+        
+        Ok(DbSandbox {
+            id,
+            name: surreal_sandbox.name,
+            runtime_type: surreal_sandbox.runtime_type,
+            template: surreal_sandbox.template,
+            status: surreal_sandbox.status,
+            owner_id,
+            tenant_id,
+            cpu_limit: surreal_sandbox.cpu_limit,
+            memory_limit: surreal_sandbox.memory_limit,
+            disk_limit: surreal_sandbox.disk_limit,
+            container_id: surreal_sandbox.container_id,
+            vm_id: surreal_sandbox.vm_id,
+            ip_address: surreal_sandbox.ip_address,
+            port_mappings: surreal_sandbox.port_mappings,
+            created_at: surreal_sandbox.created_at,
+            updated_at: surreal_sandbox.updated_at,
+            started_at: surreal_sandbox.started_at,
+            stopped_at: surreal_sandbox.stopped_at,
+            expires_at: surreal_sandbox.expires_at,
+        })
+    }
+}
+
+// Convert DatabaseError from SurrealConnectionError
+impl From<SurrealConnectionError> for DatabaseError {
+    fn from(err: SurrealConnectionError) -> Self {
+        match err {
+            SurrealConnectionError::Connection(msg) => DatabaseError::Connection(msg),
+            SurrealConnectionError::Query(msg) => DatabaseError::Query(msg),
+            SurrealConnectionError::PoolExhausted => DatabaseError::Connection("Connection pool exhausted".to_string()),
+            SurrealConnectionError::HealthCheck(msg) => DatabaseError::Connection(format!("Health check failed: {}", msg)),
+            SurrealConnectionError::Auth(msg) => DatabaseError::Connection(format!("Authentication failed: {}", msg)),
+            SurrealConnectionError::Config(msg) => DatabaseError::Connection(format!("Configuration error: {}", msg)),
+            SurrealConnectionError::Surreal(e) => DatabaseError::Other(e.to_string()),
         }
     }
 }

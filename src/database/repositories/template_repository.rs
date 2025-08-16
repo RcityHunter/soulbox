@@ -1,433 +1,242 @@
-use sqlx::Row;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{info, error};
+use tracing::{info, error, debug};
 use uuid::Uuid;
 
-use crate::database::{Database, DatabaseError, DatabasePool, DatabaseResult, models::{DbTemplate, PaginatedResult}};
+use crate::database::surrealdb::{
+    SurrealPool, SurrealOperations, QueryBuilder as SurrealQueryBuilder, UpdateBuilder, 
+    uuid_to_record_id, record_id_to_uuid, SurrealResult, SurrealConnectionError, PaginationResult
+};
+use crate::database::{DatabaseError, DatabaseResult, models::{DbTemplate, PaginatedResult}};
+
+/// SurrealDB 模板模型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SurrealTemplate {
+    pub id: String,
+    pub name: String,
+    pub slug: String,
+    pub description: Option<String>,
+    pub runtime_type: String,
+    pub base_image: String,
+    pub default_command: Option<String>,
+    pub environment_vars: Option<serde_json::Value>,
+    pub resource_limits: Option<serde_json::Value>,
+    pub is_public: bool,
+    pub owner_id: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
 
 /// 模板仓库
 pub struct TemplateRepository {
-    db: Arc<Database>,
+    pool: Arc<SurrealPool>,
 }
 
 impl TemplateRepository {
-    pub fn new(db: Arc<Database>) -> Self {
-        Self { db }
+    pub fn new(pool: Arc<SurrealPool>) -> Self {
+        Self { pool }
     }
     
     /// 创建模板
     pub async fn create(&self, template: &DbTemplate) -> DatabaseResult<()> {
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                sqlx::query!(
-                    r#"
-                    INSERT INTO templates (
-                        id, name, slug, description, runtime_type, base_image,
-                        default_command, environment_vars, resource_limits,
-                        is_public, owner_id, created_at, updated_at
-                    ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-                    )
-                    "#,
-                    template.id,
-                    template.name,
-                    template.slug,
-                    template.description,
-                    template.runtime_type,
-                    template.base_image,
-                    template.default_command,
-                    template.environment_vars,
-                    template.resource_limits,
-                    template.is_public,
-                    template.owner_id,
-                    template.created_at,
-                    template.updated_at
-                )
-                .execute(pool)
-                .await?;
-            }
-            DatabasePool::Sqlite(pool) => {
-                let id = template.id.to_string();
-                let owner_id = template.owner_id.map(|o| o.to_string());
-                let created_at = template.created_at.to_rfc3339();
-                let updated_at = template.updated_at.to_rfc3339();
-                let environment_vars = template.environment_vars.as_ref().map(|e| e.to_string());
-                let resource_limits = template.resource_limits.as_ref().map(|r| r.to_string());
-                
-                sqlx::query!(
-                    r#"
-                    INSERT INTO templates (
-                        id, name, slug, description, runtime_type, base_image,
-                        default_command, environment_vars, resource_limits,
-                        is_public, owner_id, created_at, updated_at
-                    ) VALUES (
-                        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13
-                    )
-                    "#,
-                    id,
-                    template.name,
-                    template.slug,
-                    template.description,
-                    template.runtime_type,
-                    template.base_image,
-                    template.default_command,
-                    environment_vars,
-                    resource_limits,
-                    template.is_public,
-                    owner_id,
-                    created_at,
-                    updated_at
-                )
-                .execute(pool)
-                .await?;
-            }
-        }
+        debug!("创建模板: {} ({})", template.name, template.id);
         
-        info!("Created template: {} ({})", template.name, template.slug);
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let surreal_template = SurrealTemplate {
+            id: uuid_to_record_id("templates", template.id),
+            name: template.name.clone(),
+            slug: template.slug.clone(),
+            description: template.description.clone(),
+            runtime_type: template.runtime_type.clone(),
+            base_image: template.base_image.clone(),
+            default_command: template.default_command.clone(),
+            environment_vars: template.environment_vars.clone(),
+            resource_limits: template.resource_limits.clone(),
+            is_public: template.is_public,
+            owner_id: template.owner_id.map(|id| uuid_to_record_id("users", id)),
+            created_at: template.created_at,
+            updated_at: template.updated_at,
+        };
+        
+        ops.create("templates", &surreal_template).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        
+        info!("Created template: {} ({})", template.name, template.id);
         Ok(())
     }
     
     /// 根据ID查找模板
     pub async fn find_by_id(&self, id: Uuid) -> DatabaseResult<Option<DbTemplate>> {
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                let template = sqlx::query_as!(
-                    DbTemplate,
-                    "SELECT * FROM templates WHERE id = $1",
-                    id
-                )
-                .fetch_optional(pool)
-                .await?;
-                
-                Ok(template)
+        debug!("根据ID查找模板: {}", id);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        match ops.find_by_id::<SurrealTemplate>("templates", &id.to_string()).await {
+            Ok(Some(surreal_template)) => {
+                let db_template = self.surreal_to_db_template(surreal_template)?;
+                Ok(Some(db_template))
             }
-            DatabasePool::Sqlite(pool) => {
-                let id_str = id.to_string();
-                let template = sqlx::query_as!(
-                    DbTemplate,
-                    "SELECT * FROM templates WHERE id = ?1",
-                    id_str
-                )
-                .fetch_optional(pool)
-                .await?;
-                
-                Ok(template)
-            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(DatabaseError::Query(e.to_string())),
         }
     }
     
     /// 根据slug查找模板
     pub async fn find_by_slug(&self, slug: &str) -> DatabaseResult<Option<DbTemplate>> {
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                let template = sqlx::query_as!(
-                    DbTemplate,
-                    "SELECT * FROM templates WHERE slug = $1",
-                    slug
-                )
-                .fetch_optional(pool)
-                .await?;
-                
-                Ok(template)
+        debug!("根据slug查找模板: {}", slug);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let query = SurrealQueryBuilder::new("templates")
+            .where_clause(format!("slug = '{}'", slug));
+        
+        match ops.find_where::<SurrealTemplate>(query).await {
+            Ok(mut templates) => {
+                if let Some(surreal_template) = templates.pop() {
+                    let db_template = self.surreal_to_db_template(surreal_template)?;
+                    Ok(Some(db_template))
+                } else {
+                    Ok(None)
+                }
             }
-            DatabasePool::Sqlite(pool) => {
-                let template = sqlx::query_as!(
-                    DbTemplate,
-                    "SELECT * FROM templates WHERE slug = ?1",
-                    slug
-                )
-                .fetch_optional(pool)
-                .await?;
-                
-                Ok(template)
-            }
+            Err(e) => Err(DatabaseError::Query(e.to_string())),
         }
+    }
+    
+    /// 列出公共模板
+    pub async fn list_public(&self, page: u32, page_size: u32) -> DatabaseResult<PaginatedResult<DbTemplate>> {
+        debug!("列出公共模板，页码: {}, 大小: {}", page, page_size);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let query = SurrealQueryBuilder::new("templates")
+            .where_clause("is_public = true")
+            .order_by("created_at DESC");
+        
+        let pagination_result = ops.find_paginated::<SurrealTemplate>(query, page as usize, page_size as usize).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        
+        let mut db_templates = Vec::new();
+        for surreal_template in pagination_result.items {
+            db_templates.push(self.surreal_to_db_template(surreal_template)?);
+        }
+        
+        Ok(PaginatedResult::new(
+            db_templates,
+            pagination_result.total,
+            pagination_result.page as u32,
+            pagination_result.page_size as u32,
+        ))
     }
     
     /// 更新模板
     pub async fn update(&self, template: &DbTemplate) -> DatabaseResult<()> {
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                let result = sqlx::query!(
-                    r#"
-                    UPDATE templates 
-                    SET name = $2, slug = $3, description = $4, runtime_type = $5,
-                        base_image = $6, default_command = $7, environment_vars = $8,
-                        resource_limits = $9, is_public = $10, updated_at = NOW()
-                    WHERE id = $1
-                    "#,
-                    template.id,
-                    template.name,
-                    template.slug,
-                    template.description,
-                    template.runtime_type,
-                    template.base_image,
-                    template.default_command,
-                    template.environment_vars,
-                    template.resource_limits,
-                    template.is_public
-                )
-                .execute(pool)
-                .await?;
-                
-                if result.rows_affected() == 0 {
-                    return Err(DatabaseError::NotFound);
-                }
-            }
-            DatabasePool::Sqlite(pool) => {
-                let id = template.id.to_string();
-                let environment_vars = template.environment_vars.as_ref().map(|e| e.to_string());
-                let resource_limits = template.resource_limits.as_ref().map(|r| r.to_string());
-                
-                let result = sqlx::query!(
-                    r#"
-                    UPDATE templates 
-                    SET name = ?2, slug = ?3, description = ?4, runtime_type = ?5,
-                        base_image = ?6, default_command = ?7, environment_vars = ?8,
-                        resource_limits = ?9, is_public = ?10, updated_at = datetime('now')
-                    WHERE id = ?1
-                    "#,
-                    id,
-                    template.name,
-                    template.slug,
-                    template.description,
-                    template.runtime_type,
-                    template.base_image,
-                    template.default_command,
-                    environment_vars,
-                    resource_limits,
-                    template.is_public
-                )
-                .execute(pool)
-                .await?;
-                
-                if result.rows_affected() == 0 {
-                    return Err(DatabaseError::NotFound);
-                }
-            }
+        debug!("更新模板: {} ({})", template.name, template.id);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let update = UpdateBuilder::new("templates")
+            .set(format!("name = '{}'", template.name))
+            .set(format!("slug = '{}'", template.slug))
+            .set(format!("runtime_type = '{}'", template.runtime_type))
+            .set(format!("base_image = '{}'", template.base_image))
+            .set(format!("is_public = {}", template.is_public))
+            .set("updated_at = time::now()")
+            .where_clause(format!("id = {}", uuid_to_record_id("templates", template.id)));
+        
+        let results: Vec<SurrealTemplate> = ops.update_where(update).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        
+        if results.is_empty() {
+            return Err(DatabaseError::NotFound);
         }
         
-        info!("Updated template: {}", template.slug);
+        info!("Updated template: {} ({})", template.name, template.id);
         Ok(())
     }
     
     /// 删除模板
     pub async fn delete(&self, id: Uuid) -> DatabaseResult<()> {
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                let result = sqlx::query!(
-                    "DELETE FROM templates WHERE id = $1",
-                    id
-                )
-                .execute(pool)
-                .await?;
-                
-                if result.rows_affected() == 0 {
-                    return Err(DatabaseError::NotFound);
-                }
-            }
-            DatabasePool::Sqlite(pool) => {
-                let id_str = id.to_string();
-                let result = sqlx::query!(
-                    "DELETE FROM templates WHERE id = ?1",
-                    id_str
-                )
-                .execute(pool)
-                .await?;
-                
-                if result.rows_affected() == 0 {
-                    return Err(DatabaseError::NotFound);
-                }
-            }
+        debug!("删除模板: {}", id);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let deleted = ops.delete("templates", &id.to_string()).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        
+        if !deleted {
+            return Err(DatabaseError::NotFound);
         }
         
         info!("Deleted template: {}", id);
         Ok(())
     }
     
-    /// 列出公共模板
-    pub async fn list_public(
-        &self,
-        runtime_type: Option<&str>,
-        page: u32,
-        page_size: u32,
-    ) -> DatabaseResult<PaginatedResult<DbTemplate>> {
-        let offset = ((page - 1) * page_size) as i64;
-        let limit = page_size as i64;
+    /// 将 SurrealTemplate 转换为 DbTemplate
+    fn surreal_to_db_template(&self, surreal_template: SurrealTemplate) -> DatabaseResult<DbTemplate> {
+        let id_str = surreal_template.id.split(':').last()
+            .ok_or_else(|| DatabaseError::Other("Invalid template record ID format".to_string()))?;
         
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                if let Some(runtime_type) = runtime_type {
-                    let templates = sqlx::query_as!(
-                        DbTemplate,
-                        r#"
-                        SELECT * FROM templates 
-                        WHERE is_public = true AND runtime_type = $1
-                        ORDER BY created_at DESC 
-                        LIMIT $2 OFFSET $3
-                        "#,
-                        runtime_type,
-                        limit,
-                        offset
-                    )
-                    .fetch_all(pool)
-                    .await?;
-                    
-                    let total = sqlx::query!(
-                        "SELECT COUNT(*) as count FROM templates WHERE is_public = true AND runtime_type = $1",
-                        runtime_type
-                    )
-                    .fetch_one(pool)
-                    .await?
-                    .count
-                    .unwrap_or(0);
-                    
-                    Ok(PaginatedResult::new(templates, total, page, page_size))
-                } else {
-                    let templates = sqlx::query_as!(
-                        DbTemplate,
-                        r#"
-                        SELECT * FROM templates 
-                        WHERE is_public = true
-                        ORDER BY created_at DESC 
-                        LIMIT $1 OFFSET $2
-                        "#,
-                        limit,
-                        offset
-                    )
-                    .fetch_all(pool)
-                    .await?;
-                    
-                    let total = sqlx::query!(
-                        "SELECT COUNT(*) as count FROM templates WHERE is_public = true"
-                    )
-                    .fetch_one(pool)
-                    .await?
-                    .count
-                    .unwrap_or(0);
-                    
-                    Ok(PaginatedResult::new(templates, total, page, page_size))
-                }
-            }
-            DatabasePool::Sqlite(pool) => {
-                if let Some(runtime_type) = runtime_type {
-                    let templates = sqlx::query_as!(
-                        DbTemplate,
-                        r#"
-                        SELECT * FROM templates 
-                        WHERE is_public = 1 AND runtime_type = ?1
-                        ORDER BY created_at DESC 
-                        LIMIT ?2 OFFSET ?3
-                        "#,
-                        runtime_type,
-                        limit,
-                        offset
-                    )
-                    .fetch_all(pool)
-                    .await?;
-                    
-                    let total = sqlx::query!(
-                        "SELECT COUNT(*) as count FROM templates WHERE is_public = 1 AND runtime_type = ?1",
-                        runtime_type
-                    )
-                    .fetch_one(pool)
-                    .await?
-                    .count;
-                    
-                    Ok(PaginatedResult::new(templates, total, page, page_size))
-                } else {
-                    let templates = sqlx::query_as!(
-                        DbTemplate,
-                        r#"
-                        SELECT * FROM templates 
-                        WHERE is_public = 1
-                        ORDER BY created_at DESC 
-                        LIMIT ?1 OFFSET ?2
-                        "#,
-                        limit,
-                        offset
-                    )
-                    .fetch_all(pool)
-                    .await?;
-                    
-                    let total = sqlx::query!(
-                        "SELECT COUNT(*) as count FROM templates WHERE is_public = 1"
-                    )
-                    .fetch_one(pool)
-                    .await?
-                    .count;
-                    
-                    Ok(PaginatedResult::new(templates, total, page, page_size))
-                }
-            }
-        }
+        let id = id_str.parse::<Uuid>()
+            .map_err(|e| DatabaseError::Other(format!("Failed to parse template UUID: {}", e)))?;
+        
+        let owner_id = if let Some(owner_record_id) = &surreal_template.owner_id {
+            let owner_id_str = owner_record_id.split(':').last()
+                .ok_or_else(|| DatabaseError::Other("Invalid owner record ID format".to_string()))?;
+            Some(owner_id_str.parse::<Uuid>()
+                .map_err(|e| DatabaseError::Other(format!("Failed to parse owner UUID: {}", e)))?)
+        } else {
+            None
+        };
+        
+        Ok(DbTemplate {
+            id,
+            name: surreal_template.name,
+            slug: surreal_template.slug,
+            description: surreal_template.description,
+            runtime_type: surreal_template.runtime_type,
+            base_image: surreal_template.base_image,
+            default_command: surreal_template.default_command,
+            environment_vars: surreal_template.environment_vars,
+            resource_limits: surreal_template.resource_limits,
+            is_public: surreal_template.is_public,
+            owner_id,
+            created_at: surreal_template.created_at,
+            updated_at: surreal_template.updated_at,
+        })
     }
-    
-    /// 列出用户的模板
-    pub async fn list_by_owner(
-        &self,
-        owner_id: Uuid,
-        page: u32,
-        page_size: u32,
-    ) -> DatabaseResult<PaginatedResult<DbTemplate>> {
-        let offset = ((page - 1) * page_size) as i64;
-        let limit = page_size as i64;
-        
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                let templates = sqlx::query_as!(
-                    DbTemplate,
-                    r#"
-                    SELECT * FROM templates 
-                    WHERE owner_id = $1 
-                    ORDER BY created_at DESC 
-                    LIMIT $2 OFFSET $3
-                    "#,
-                    owner_id,
-                    limit,
-                    offset
-                )
-                .fetch_all(pool)
-                .await?;
-                
-                let total = sqlx::query!(
-                    "SELECT COUNT(*) as count FROM templates WHERE owner_id = $1",
-                    owner_id
-                )
-                .fetch_one(pool)
-                .await?
-                .count
-                .unwrap_or(0);
-                
-                Ok(PaginatedResult::new(templates, total, page, page_size))
-            }
-            DatabasePool::Sqlite(pool) => {
-                let owner_id_str = owner_id.to_string();
-                let templates = sqlx::query_as!(
-                    DbTemplate,
-                    r#"
-                    SELECT * FROM templates 
-                    WHERE owner_id = ?1 
-                    ORDER BY created_at DESC 
-                    LIMIT ?2 OFFSET ?3
-                    "#,
-                    owner_id_str,
-                    limit,
-                    offset
-                )
-                .fetch_all(pool)
-                .await?;
-                
-                let total = sqlx::query!(
-                    "SELECT COUNT(*) as count FROM templates WHERE owner_id = ?1",
-                    owner_id_str
-                )
-                .fetch_one(pool)
-                .await?
-                .count;
-                
-                Ok(PaginatedResult::new(templates, total, page, page_size))
-            }
+}
+
+// Convert DatabaseError from SurrealConnectionError
+impl From<SurrealConnectionError> for DatabaseError {
+    fn from(err: SurrealConnectionError) -> Self {
+        match err {
+            SurrealConnectionError::Connection(msg) => DatabaseError::Connection(msg),
+            SurrealConnectionError::Query(msg) => DatabaseError::Query(msg),
+            SurrealConnectionError::PoolExhausted => DatabaseError::Connection("Connection pool exhausted".to_string()),
+            SurrealConnectionError::HealthCheck(msg) => DatabaseError::Connection(format!("Health check failed: {}", msg)),
+            SurrealConnectionError::Auth(msg) => DatabaseError::Connection(format!("Authentication failed: {}", msg)),
+            SurrealConnectionError::Config(msg) => DatabaseError::Connection(format!("Configuration error: {}", msg)),
+            SurrealConnectionError::Surreal(e) => DatabaseError::Other(e.to_string()),
         }
     }
 }

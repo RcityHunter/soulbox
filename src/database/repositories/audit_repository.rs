@@ -1,393 +1,323 @@
 use chrono::{DateTime, Utc};
-use sqlx::{QueryBuilder, Row};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{info, error};
+use tracing::{info, error, debug};
 use uuid::Uuid;
 
-use crate::audit::models::{AuditLog, AuditQuery, AuditEventType, AuditSeverity, AuditResult};
-use crate::database::{Database, DatabaseError, DatabasePool, DatabaseResult, models::{DbAuditLog, PaginatedResult}};
+use crate::audit::models::{AuditLog, AuditEventType, AuditSeverity, AuditResult};
+use crate::database::surrealdb::{
+    SurrealPool, SurrealOperations, QueryBuilder as SurrealQueryBuilder, 
+    uuid_to_record_id, record_id_to_uuid, SurrealResult, SurrealConnectionError, PaginationResult
+};
+use crate::database::{DatabaseError, DatabaseResult, models::{DbAuditLog, PaginatedResult}};
+
+/// SurrealDB 审计日志模型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SurrealAuditLog {
+    pub id: String,
+    pub event_type: String,
+    pub severity: String,
+    pub result: String,
+    pub timestamp: DateTime<Utc>,
+    pub user_id: Option<String>,
+    pub username: Option<String>,
+    pub user_role: Option<String>,
+    pub tenant_id: Option<String>,
+    pub request_id: Option<String>,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+    pub request_path: Option<String>,
+    pub http_method: Option<String>,
+    pub resource_type: Option<String>,
+    pub resource_id: Option<String>,
+    pub resource_name: Option<String>,
+    pub permission: Option<String>,
+    pub old_role: Option<String>,
+    pub new_role: Option<String>,
+    pub message: String,
+    pub details: Option<serde_json::Value>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub session_id: Option<String>,
+    pub correlation_id: Option<String>,
+    pub tags: Option<serde_json::Value>,
+}
 
 /// 审计日志仓库
 pub struct AuditRepository {
-    db: Arc<Database>,
+    pool: Arc<SurrealPool>,
 }
 
 impl AuditRepository {
-    pub fn new(db: Arc<Database>) -> Self {
-        Self { db }
+    pub fn new(pool: Arc<SurrealPool>) -> Self {
+        Self { pool }
     }
     
     /// 创建审计日志
-    pub async fn create(&self, log: &AuditLog) -> DatabaseResult<()> {
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                sqlx::query(
-                    r#"
-                    INSERT INTO audit_logs (
-                        id, event_type, severity, result, timestamp,
-                        user_id, username, user_role, tenant_id,
-                        request_id, ip_address, user_agent, request_path, http_method,
-                        resource_type, resource_id, resource_name,
-                        permission, old_role, new_role,
-                        message, details, error_code, error_message,
-                        session_id, correlation_id, tags
-                    ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                        $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27
-                    )
-                    "#,
-                    log.id,
-                    format!("{:?}", log.event_type),
-                    format!("{:?}", log.severity),
-                    format!("{:?}", log.result),
-                    log.timestamp,
-                    log.user_id,
-                    log.username,
-                    log.user_role.as_ref().map(|r| format!("{:?}", r)),
-                    log.tenant_id,
-                    log.request_id,
-                    log.ip_address,
-                    log.user_agent,
-                    log.request_path,
-                    log.http_method,
-                    log.resource_type,
-                    log.resource_id,
-                    log.resource_name,
-                    log.permission.as_ref().map(|p| format!("{:?}", p)),
-                    log.old_role.as_ref().map(|r| format!("{:?}", r)),
-                    log.new_role.as_ref().map(|r| format!("{:?}", r)),
-                    log.message,
-                    log.details.as_ref().map(|d| serde_json::to_value(d).ok()).flatten(),
-                    log.error_code,
-                    log.error_message,
-                    log.session_id,
-                    log.correlation_id,
-                    log.tags.as_ref().map(|t| serde_json::to_value(t).ok()).flatten()
-                )
-                .execute(pool)
-                .await?;
-            }
-            DatabasePool::Sqlite(pool) => {
-                let id = log.id.to_string();
-                let event_type = format!("{:?}", log.event_type);
-                let severity = format!("{:?}", log.severity);
-                let result = format!("{:?}", log.result);
-                let timestamp = log.timestamp.to_rfc3339();
-                let user_id = log.user_id.map(|u| u.to_string());
-                let user_role = log.user_role.as_ref().map(|r| format!("{:?}", r));
-                let tenant_id = log.tenant_id.map(|t| t.to_string());
-                let permission = log.permission.as_ref().map(|p| format!("{:?}", p));
-                let old_role = log.old_role.as_ref().map(|r| format!("{:?}", r));
-                let new_role = log.new_role.as_ref().map(|r| format!("{:?}", r));
-                let details = log.details.as_ref().map(|d| serde_json::to_string(d).ok()).flatten();
-                let tags = log.tags.as_ref().map(|t| serde_json::to_string(t).ok()).flatten();
-                
-                sqlx::query(
-                    r#"
-                    INSERT INTO audit_logs (
-                        id, event_type, severity, result, timestamp,
-                        user_id, username, user_role, tenant_id,
-                        request_id, ip_address, user_agent, request_path, http_method,
-                        resource_type, resource_id, resource_name,
-                        permission, old_role, new_role,
-                        message, details, error_code, error_message,
-                        session_id, correlation_id, tags
-                    ) VALUES (
-                        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                        ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
-                    )
-                    "#,
-                    id,
-                    event_type,
-                    severity,
-                    result,
-                    timestamp,
-                    user_id,
-                    log.username,
-                    user_role,
-                    tenant_id,
-                    log.request_id,
-                    log.ip_address,
-                    log.user_agent,
-                    log.request_path,
-                    log.http_method,
-                    log.resource_type,
-                    log.resource_id,
-                    log.resource_name,
-                    permission,
-                    old_role,
-                    new_role,
-                    log.message,
-                    details,
-                    log.error_code,
-                    log.error_message,
-                    log.session_id,
-                    log.correlation_id,
-                    tags
-                )
-                .execute(pool)
-                .await?;
-            }
-        }
+    pub async fn create(&self, audit_log: &AuditLog) -> DatabaseResult<()> {
+        debug!("创建审计日志: {} - {}", audit_log.event_type, audit_log.message);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let surreal_audit_log = SurrealAuditLog {
+            id: uuid_to_record_id("audit_logs", audit_log.id),
+            event_type: format!("{:?}", audit_log.event_type),
+            severity: format!("{:?}", audit_log.severity),
+            result: format!("{:?}", audit_log.result),
+            timestamp: audit_log.timestamp,
+            user_id: audit_log.user_id.map(|id| uuid_to_record_id("users", id)),
+            username: audit_log.username.clone(),
+            user_role: audit_log.user_role.as_ref().map(|r| format!("{:?}", r)),
+            tenant_id: audit_log.tenant_id.map(|id| uuid_to_record_id("tenants", id)),
+            request_id: audit_log.request_id.clone(),
+            ip_address: audit_log.ip_address.clone(),
+            user_agent: audit_log.user_agent.clone(),
+            request_path: audit_log.request_path.clone(),
+            http_method: audit_log.http_method.clone(),
+            resource_type: audit_log.resource_type.clone(),
+            resource_id: audit_log.resource_id.clone(),
+            resource_name: audit_log.resource_name.clone(),
+            permission: audit_log.permission.as_ref().map(|p| format!("{:?}", p)),
+            old_role: audit_log.old_role.as_ref().map(|r| format!("{:?}", r)),
+            new_role: audit_log.new_role.as_ref().map(|r| format!("{:?}", r)),
+            message: audit_log.message.clone(),
+            details: audit_log.details.as_ref().map(|d| serde_json::to_value(d).unwrap_or(serde_json::Value::Null)),
+            error_code: audit_log.error_code.clone(),
+            error_message: audit_log.error_message.clone(),
+            session_id: audit_log.session_id.clone(),
+            correlation_id: audit_log.correlation_id.clone(),
+            tags: audit_log.tags.as_ref().map(|t| serde_json::to_value(t).unwrap_or(serde_json::Value::Null)),
+        };
+        
+        ops.create("audit_logs", &surreal_audit_log).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
         
         Ok(())
     }
     
-    /// 查询审计日志
-    pub async fn query(&self, query: AuditQuery) -> DatabaseResult<Vec<DbAuditLog>> {
-        let page = query.page.unwrap_or(1).max(1);
-        let limit = query.limit.unwrap_or(100).min(1000) as i64;
-        let offset = ((page - 1) * limit as u32) as i64;
+    /// 根据ID查找审计日志
+    pub async fn find_by_id(&self, id: Uuid) -> DatabaseResult<Option<DbAuditLog>> {
+        debug!("根据ID查找审计日志: {}", id);
         
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                let mut query_builder = QueryBuilder::new(
-                    "SELECT * FROM audit_logs WHERE 1=1"
-                );
-                
-                // 构建查询条件
-                if let Some(event_type) = &query.event_type {
-                    query_builder.push(" AND event_type = ");
-                    query_builder.push_bind(format!("{:?}", event_type));
-                }
-                
-                if let Some(severity) = &query.severity {
-                    query_builder.push(" AND severity = ");
-                    query_builder.push_bind(format!("{:?}", severity));
-                }
-                
-                if let Some(result) = &query.result {
-                    query_builder.push(" AND result = ");
-                    query_builder.push_bind(format!("{:?}", result));
-                }
-                
-                if let Some(user_id) = &query.user_id {
-                    query_builder.push(" AND user_id = ");
-                    query_builder.push_bind(user_id);
-                }
-                
-                if let Some(tenant_id) = &query.tenant_id {
-                    query_builder.push(" AND tenant_id = ");
-                    query_builder.push_bind(tenant_id);
-                }
-                
-                if let Some(resource_type) = &query.resource_type {
-                    query_builder.push(" AND resource_type = ");
-                    query_builder.push_bind(resource_type);
-                }
-                
-                if let Some(resource_id) = &query.resource_id {
-                    query_builder.push(" AND resource_id = ");
-                    query_builder.push_bind(resource_id);
-                }
-                
-                if let Some(start_time) = &query.start_time {
-                    query_builder.push(" AND timestamp >= ");
-                    query_builder.push_bind(start_time);
-                }
-                
-                if let Some(end_time) = &query.end_time {
-                    query_builder.push(" AND timestamp <= ");
-                    query_builder.push_bind(end_time);
-                }
-                
-                // 排序
-                let order_by = query.order_by.as_deref().unwrap_or("timestamp");
-                let order_direction = if query.order_desc.unwrap_or(true) { "DESC" } else { "ASC" };
-                query_builder.push(format!(" ORDER BY {} {}", order_by, order_direction));
-                
-                // 分页
-                query_builder.push(" LIMIT ");
-                query_builder.push_bind(limit);
-                query_builder.push(" OFFSET ");
-                query_builder.push_bind(offset);
-                
-                let logs = query_builder
-                    .build_query_as::<DbAuditLog>()
-                    .fetch_all(pool)
-                    .await?;
-                
-                Ok(logs)
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        match ops.find_by_id::<SurrealAuditLog>("audit_logs", &id.to_string()).await {
+            Ok(Some(surreal_audit_log)) => {
+                let db_audit_log = self.surreal_to_db_audit_log(surreal_audit_log)?;
+                Ok(Some(db_audit_log))
             }
-            DatabasePool::Sqlite(pool) => {
-                // SQLite 版本类似，但需要调整一些语法
-                let mut query_builder = QueryBuilder::new(
-                    "SELECT * FROM audit_logs WHERE 1=1"
-                );
-                
-                // 构建查询条件（与 PostgreSQL 类似）
-                if let Some(event_type) = &query.event_type {
-                    query_builder.push(" AND event_type = ");
-                    query_builder.push_bind(format!("{:?}", event_type));
-                }
-                
-                if let Some(severity) = &query.severity {
-                    query_builder.push(" AND severity = ");
-                    query_builder.push_bind(format!("{:?}", severity));
-                }
-                
-                if let Some(result) = &query.result {
-                    query_builder.push(" AND result = ");
-                    query_builder.push_bind(format!("{:?}", result));
-                }
-                
-                if let Some(user_id) = &query.user_id {
-                    query_builder.push(" AND user_id = ");
-                    query_builder.push_bind(user_id.to_string());
-                }
-                
-                if let Some(tenant_id) = &query.tenant_id {
-                    query_builder.push(" AND tenant_id = ");
-                    query_builder.push_bind(tenant_id.to_string());
-                }
-                
-                if let Some(resource_type) = &query.resource_type {
-                    query_builder.push(" AND resource_type = ");
-                    query_builder.push_bind(resource_type);
-                }
-                
-                if let Some(resource_id) = &query.resource_id {
-                    query_builder.push(" AND resource_id = ");
-                    query_builder.push_bind(resource_id);
-                }
-                
-                if let Some(start_time) = &query.start_time {
-                    query_builder.push(" AND timestamp >= ");
-                    query_builder.push_bind(start_time.to_rfc3339());
-                }
-                
-                if let Some(end_time) = &query.end_time {
-                    query_builder.push(" AND timestamp <= ");
-                    query_builder.push_bind(end_time.to_rfc3339());
-                }
-                
-                // 排序和分页
-                let order_by = query.order_by.as_deref().unwrap_or("timestamp");
-                let order_direction = if query.order_desc.unwrap_or(true) { "DESC" } else { "ASC" };
-                query_builder.push(format!(" ORDER BY {} {}", order_by, order_direction));
-                query_builder.push(" LIMIT ");
-                query_builder.push_bind(limit);
-                query_builder.push(" OFFSET ");
-                query_builder.push_bind(offset);
-                
-                let logs = query_builder
-                    .build_query_as::<DbAuditLog>()
-                    .fetch_all(pool)
-                    .await?;
-                
-                Ok(logs)
-            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(DatabaseError::Query(e.to_string())),
         }
     }
     
-    /// 统计审计日志
-    pub async fn count(&self, query: Option<AuditQuery>) -> DatabaseResult<i64> {
-        let query = query.unwrap_or_default();
+    /// 列出用户的审计日志
+    pub async fn list_by_user(
+        &self,
+        user_id: Uuid,
+        page: u32,
+        page_size: u32,
+    ) -> DatabaseResult<PaginatedResult<DbAuditLog>> {
+        debug!("列出用户 {} 的审计日志，页码: {}, 大小: {}", user_id, page, page_size);
         
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                let mut query_builder = QueryBuilder::new(
-                    "SELECT COUNT(*) as count FROM audit_logs WHERE 1=1"
-                );
-                
-                // 构建查询条件（与 query 方法相同）
-                if let Some(event_type) = &query.event_type {
-                    query_builder.push(" AND event_type = ");
-                    query_builder.push_bind(format!("{:?}", event_type));
-                }
-                
-                if let Some(severity) = &query.severity {
-                    query_builder.push(" AND severity = ");
-                    query_builder.push_bind(format!("{:?}", severity));
-                }
-                
-                if let Some(result) = &query.result {
-                    query_builder.push(" AND result = ");
-                    query_builder.push_bind(format!("{:?}", result));
-                }
-                
-                if let Some(user_id) = &query.user_id {
-                    query_builder.push(" AND user_id = ");
-                    query_builder.push_bind(user_id);
-                }
-                
-                if let Some(tenant_id) = &query.tenant_id {
-                    query_builder.push(" AND tenant_id = ");
-                    query_builder.push_bind(tenant_id);
-                }
-                
-                let row = query_builder
-                    .build()
-                    .fetch_one(pool)
-                    .await?;
-                
-                Ok(row.get::<i64, _>("count"))
-            }
-            DatabasePool::Sqlite(pool) => {
-                let mut query_builder = QueryBuilder::new(
-                    "SELECT COUNT(*) as count FROM audit_logs WHERE 1=1"
-                );
-                
-                // 构建查询条件（与 PostgreSQL 类似，但 UUID 需要转换）
-                if let Some(event_type) = &query.event_type {
-                    query_builder.push(" AND event_type = ");
-                    query_builder.push_bind(format!("{:?}", event_type));
-                }
-                
-                if let Some(severity) = &query.severity {
-                    query_builder.push(" AND severity = ");
-                    query_builder.push_bind(format!("{:?}", severity));
-                }
-                
-                if let Some(result) = &query.result {
-                    query_builder.push(" AND result = ");
-                    query_builder.push_bind(format!("{:?}", result));
-                }
-                
-                if let Some(user_id) = &query.user_id {
-                    query_builder.push(" AND user_id = ");
-                    query_builder.push_bind(user_id.to_string());
-                }
-                
-                if let Some(tenant_id) = &query.tenant_id {
-                    query_builder.push(" AND tenant_id = ");
-                    query_builder.push_bind(tenant_id.to_string());
-                }
-                
-                let row = query_builder
-                    .build()
-                    .fetch_one(pool)
-                    .await?;
-                
-                Ok(row.get::<i64, _>("count"))
-            }
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let query = SurrealQueryBuilder::new("audit_logs")
+            .where_clause(format!("user_id = {}", uuid_to_record_id("users", user_id)))
+            .order_by("timestamp DESC");
+        
+        let pagination_result = ops.find_paginated::<SurrealAuditLog>(query, page as usize, page_size as usize).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        
+        let mut db_audit_logs = Vec::new();
+        for surreal_audit_log in pagination_result.items {
+            db_audit_logs.push(self.surreal_to_db_audit_log(surreal_audit_log)?);
         }
+        
+        Ok(PaginatedResult::new(
+            db_audit_logs,
+            pagination_result.total,
+            pagination_result.page as u32,
+            pagination_result.page_size as u32,
+        ))
     }
     
-    /// 删除过期的审计日志
-    pub async fn delete_old_logs(&self, before: DateTime<Utc>) -> DatabaseResult<u64> {
-        match &*self.db.pool() {
-            DatabasePool::Postgres(pool) => {
-                let result = sqlx::query!(
-                    "DELETE FROM audit_logs WHERE timestamp < $1",
-                    before
-                )
-                .execute(pool)
-                .await?;
-                
-                Ok(result.rows_affected())
-            }
-            DatabasePool::Sqlite(pool) => {
-                let result = sqlx::query!(
-                    "DELETE FROM audit_logs WHERE timestamp < ?1",
-                    before.to_rfc3339()
-                )
-                .execute(pool)
-                .await?;
-                
-                Ok(result.rows_affected())
-            }
+    /// 列出租户的审计日志
+    pub async fn list_by_tenant(
+        &self,
+        tenant_id: Uuid,
+        page: u32,
+        page_size: u32,
+    ) -> DatabaseResult<PaginatedResult<DbAuditLog>> {
+        debug!("列出租户 {} 的审计日志，页码: {}, 大小: {}", tenant_id, page, page_size);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let query = SurrealQueryBuilder::new("audit_logs")
+            .where_clause(format!("tenant_id = {}", uuid_to_record_id("tenants", tenant_id)))
+            .order_by("timestamp DESC");
+        
+        let pagination_result = ops.find_paginated::<SurrealAuditLog>(query, page as usize, page_size as usize).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        
+        let mut db_audit_logs = Vec::new();
+        for surreal_audit_log in pagination_result.items {
+            db_audit_logs.push(self.surreal_to_db_audit_log(surreal_audit_log)?);
+        }
+        
+        Ok(PaginatedResult::new(
+            db_audit_logs,
+            pagination_result.total,
+            pagination_result.page as u32,
+            pagination_result.page_size as u32,
+        ))
+    }
+    
+    /// 根据事件类型查询审计日志
+    pub async fn list_by_event_type(
+        &self,
+        event_type: &AuditEventType,
+        page: u32,
+        page_size: u32,
+    ) -> DatabaseResult<PaginatedResult<DbAuditLog>> {
+        debug!("根据事件类型查询审计日志: {:?}, 页码: {}, 大小: {}", event_type, page, page_size);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        let query = SurrealQueryBuilder::new("audit_logs")
+            .where_clause(format!("event_type = '{:?}'", event_type))
+            .order_by("timestamp DESC");
+        
+        let pagination_result = ops.find_paginated::<SurrealAuditLog>(query, page as usize, page_size as usize).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        
+        let mut db_audit_logs = Vec::new();
+        for surreal_audit_log in pagination_result.items {
+            db_audit_logs.push(self.surreal_to_db_audit_log(surreal_audit_log)?);
+        }
+        
+        Ok(PaginatedResult::new(
+            db_audit_logs,
+            pagination_result.total,
+            pagination_result.page as u32,
+            pagination_result.page_size as u32,
+        ))
+    }
+    
+    /// 清理旧的审计日志
+    pub async fn cleanup_old_logs(&self, days: u32) -> DatabaseResult<i64> {
+        debug!("清理 {} 天前的审计日志", days);
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        // 查找过期日志
+        let query = SurrealQueryBuilder::new("audit_logs")
+            .where_clause(format!("timestamp < time::now() - {}d", days));
+        
+        let old_logs: Vec<SurrealAuditLog> = ops.find_where(query).await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        
+        let count = old_logs.len() as i64;
+        
+        if count > 0 {
+            // 删除过期日志
+            let sql = format!("DELETE audit_logs WHERE timestamp < time::now() - {}d", days);
+            ops.query::<SurrealAuditLog>(&sql).await
+                .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            
+            info!("清理了 {} 条过期审计日志", count);
+        }
+        
+        Ok(count)
+    }
+    
+    /// 将 SurrealAuditLog 转换为 DbAuditLog
+    fn surreal_to_db_audit_log(&self, surreal_audit_log: SurrealAuditLog) -> DatabaseResult<DbAuditLog> {
+        let id_str = surreal_audit_log.id.split(':').last()
+            .ok_or_else(|| DatabaseError::Other("Invalid audit log record ID format".to_string()))?;
+        
+        let id = id_str.parse::<Uuid>()
+            .map_err(|e| DatabaseError::Other(format!("Failed to parse audit log UUID: {}", e)))?;
+        
+        let user_id = if let Some(user_record_id) = &surreal_audit_log.user_id {
+            let user_id_str = user_record_id.split(':').last()
+                .ok_or_else(|| DatabaseError::Other("Invalid user record ID format".to_string()))?;
+            Some(user_id_str.parse::<Uuid>()
+                .map_err(|e| DatabaseError::Other(format!("Failed to parse user UUID: {}", e)))?)
+        } else {
+            None
+        };
+        
+        let tenant_id = if let Some(tenant_record_id) = &surreal_audit_log.tenant_id {
+            let tenant_id_str = tenant_record_id.split(':').last()
+                .ok_or_else(|| DatabaseError::Other("Invalid tenant record ID format".to_string()))?;
+            Some(tenant_id_str.parse::<Uuid>()
+                .map_err(|e| DatabaseError::Other(format!("Failed to parse tenant UUID: {}", e)))?)
+        } else {
+            None
+        };
+        
+        Ok(DbAuditLog {
+            id,
+            event_type: surreal_audit_log.event_type,
+            severity: surreal_audit_log.severity,
+            result: surreal_audit_log.result,
+            timestamp: surreal_audit_log.timestamp,
+            user_id,
+            username: surreal_audit_log.username,
+            user_role: surreal_audit_log.user_role,
+            tenant_id,
+            request_id: surreal_audit_log.request_id,
+            ip_address: surreal_audit_log.ip_address,
+            user_agent: surreal_audit_log.user_agent,
+            request_path: surreal_audit_log.request_path,
+            http_method: surreal_audit_log.http_method,
+            resource_type: surreal_audit_log.resource_type,
+            resource_id: surreal_audit_log.resource_id,
+            resource_name: surreal_audit_log.resource_name,
+            permission: surreal_audit_log.permission,
+            old_role: surreal_audit_log.old_role,
+            new_role: surreal_audit_log.new_role,
+            message: surreal_audit_log.message,
+            details: surreal_audit_log.details,
+            error_code: surreal_audit_log.error_code,
+            error_message: surreal_audit_log.error_message,
+            session_id: surreal_audit_log.session_id,
+            correlation_id: surreal_audit_log.correlation_id,
+            tags: surreal_audit_log.tags,
+        })
+    }
+}
+
+// Convert DatabaseError from SurrealConnectionError
+impl From<SurrealConnectionError> for DatabaseError {
+    fn from(err: SurrealConnectionError) -> Self {
+        match err {
+            SurrealConnectionError::Connection(msg) => DatabaseError::Connection(msg),
+            SurrealConnectionError::Query(msg) => DatabaseError::Query(msg),
+            SurrealConnectionError::PoolExhausted => DatabaseError::Connection("Connection pool exhausted".to_string()),
+            SurrealConnectionError::HealthCheck(msg) => DatabaseError::Connection(format!("Health check failed: {}", msg)),
+            SurrealConnectionError::Auth(msg) => DatabaseError::Connection(format!("Authentication failed: {}", msg)),
+            SurrealConnectionError::Config(msg) => DatabaseError::Connection(format!("Configuration error: {}", msg)),
+            SurrealConnectionError::Surreal(e) => DatabaseError::Other(e.to_string()),
         }
     }
 }
-// DbAuditLog conversion is now handled in the models.rs file

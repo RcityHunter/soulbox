@@ -47,32 +47,20 @@ pub struct CloneTemplateRequest {
 
 /// Helper function to map template errors to HTTP status codes
 fn map_template_error_to_status(error: &SoulBoxError) -> StatusCode {
-    if let Some(template_error) = error.to_string().parse::<TemplateError>().ok() {
-        match template_error {
-            TemplateError::NotFound(_) => StatusCode::NOT_FOUND,
-            TemplateError::SlugConflict(_) => StatusCode::CONFLICT,
-            TemplateError::ValidationFailed(_) => StatusCode::BAD_REQUEST,
-            TemplateError::SecurityViolation(_) => StatusCode::BAD_REQUEST,
-            TemplateError::PermissionDenied(_) => StatusCode::FORBIDDEN,
-            TemplateError::VerifiedTemplateImmutable => StatusCode::BAD_REQUEST,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
-        }
+    let error_str = error.to_string().to_lowercase();
+    
+    if error_str.contains("not found") {
+        StatusCode::NOT_FOUND
+    } else if error_str.contains("conflict") || error_str.contains("already exists") {
+        StatusCode::CONFLICT
+    } else if error_str.contains("validation") || error_str.contains("invalid") {
+        StatusCode::BAD_REQUEST
+    } else if error_str.contains("permission") || error_str.contains("forbidden") || error_str.contains("denied") {
+        StatusCode::FORBIDDEN
+    } else if error_str.contains("security") {
+        StatusCode::BAD_REQUEST
     } else {
-        // For non-template errors, use string matching as fallback
-        let error_str = error.to_string().to_lowercase();
-        if error_str.contains("not found") {
-            StatusCode::NOT_FOUND
-        } else if error_str.contains("already exists") || error_str.contains("conflict") {
-            StatusCode::CONFLICT
-        } else if error_str.contains("validation") || error_str.contains("invalid") {
-            StatusCode::BAD_REQUEST
-        } else if error_str.contains("permission") || error_str.contains("forbidden") || error_str.contains("owner") {
-            StatusCode::FORBIDDEN
-        } else if error_str.contains("verified") {
-            StatusCode::BAD_REQUEST
-        } else {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
+        StatusCode::INTERNAL_SERVER_ERROR
     }
 }
 
