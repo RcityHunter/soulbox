@@ -48,7 +48,7 @@ pub enum CircuitState {
 }
 
 /// Circuit breaker statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct CircuitBreakerStats {
     pub state: CircuitState,
     pub failure_count: u32,

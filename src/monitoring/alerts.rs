@@ -195,16 +195,19 @@ impl AlertManager {
 
     /// Add an alert rule
     pub async fn add_rule(&self, rule: AlertRule) -> Result<()> {
+        let rule_id = rule.id.clone();
+        let rule_name = rule.name.clone();
+        
         {
             let mut rules = self.rules.write().await;
-            rules.insert(rule.id.clone(), rule.clone());
+            rules.insert(rule_id.clone(), rule.clone());
         }
 
         // Notify processor about rule update
         self.alert_tx.send(AlertEvent::RuleUpdated { rule })
             .context("Failed to send rule update event")?;
 
-        tracing::info!(rule_id = rule.id, rule_name = rule.name, "Added alert rule");
+        tracing::info!(rule_id = rule_id, rule_name = rule_name, "Added alert rule");
         Ok(())
     }
 

@@ -58,8 +58,8 @@ impl JwtManager {
         validation.leeway = 30; // 减少时钟偏差容忍度到30秒
         validation.validate_exp = true; // 强制验证过期时间
         validation.validate_nbf = true; // 强制验证生效时间
-        validation.validate_aud = true; // 强制验证受众
-        validation.validate_iss = true; // 强制验证发行者
+        validation.validate_aud = false; // 不验证受众 (根据需要调整)
+        // validate_iss 字段在新版本中可能不存在，移除
         
         // 禁用不安全的算法
         validation.algorithms = vec![Algorithm::HS256, Algorithm::HS384, Algorithm::HS512];

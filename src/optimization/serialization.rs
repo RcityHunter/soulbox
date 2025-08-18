@@ -233,7 +233,7 @@ impl SerializationOptimizer {
     /// Stream serialize large data
     pub async fn stream_serialize<T>(&self, data: &T, format: SerializationFormat) -> Result<Vec<u8>>
     where
-        T: Serialize,
+        T: Serialize + std::fmt::Debug,
     {
         // For now, fallback to regular serialization
         // In a real implementation, this would use streaming serialization

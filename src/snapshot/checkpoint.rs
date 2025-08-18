@@ -399,10 +399,12 @@ impl CheckpointManager {
             tar_data.extend_from_slice(&chunk);
         }
 
+        let total_size = tar_data.len() as u64;
+        
         Ok(FilesystemCheckpoint {
             tar_data,
             file_count: 0, // Could be calculated by parsing tar
-            total_size: tar_data.len() as u64,
+            total_size,
             compression_used: false,
         })
     }
@@ -447,8 +449,8 @@ impl CheckpointManager {
         Ok(RuntimeState {
             pid: state.pid.map(|p| p as u32),
             exit_code: state.exit_code,
-            started_at: state.started_at,
-            finished_at: state.finished_at,
+            started_at: state.started_at.and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&chrono::Utc))),
+            finished_at: state.finished_at.and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&chrono::Utc))),
             process_tree: Vec::new(), // Could be populated by inspecting container processes
             open_files: Vec::new(),
         })

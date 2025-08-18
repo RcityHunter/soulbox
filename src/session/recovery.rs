@@ -60,7 +60,7 @@ impl SessionRecoveryService {
         
         // Find orphaned containers (containers without sessions)
         for container in &running_containers {
-            match self.session_manager.get_session_by_container(&container.id).await? {
+            match self.session_manager.get_session_by_container(&container.container_id).await? {
                 Some(session) => {
                     // Session exists, check if recovery is needed
                     let context = self.assess_session_health(&session).await?;
@@ -69,9 +69,9 @@ impl SessionRecoveryService {
                 }
                 None => {
                     // Orphaned container, clean it up
-                    warn!("Found orphaned container {}, cleaning up", container.id);
-                    if let Err(e) = self.container_manager.stop_container(&container.id).await {
-                        error!("Failed to stop orphaned container {}: {}", container.id, e);
+                    warn!("Found orphaned container {}, cleaning up", container.container_id);
+                    if let Err(e) = self.container_manager.stop_container(&container.container_id).await {
+                        error!("Failed to stop orphaned container {}: {}", container.container_id, e);
                     }
                     
                     recovery_results.push(RecoveryResult {
@@ -127,20 +127,21 @@ impl SessionRecoveryService {
         // Check container status if session has a container
         if let Some(container_id) = &session.container_id {
             match self.container_manager.get_container_info(container_id).await {
-                Ok(Some(info)) => {
+                Ok(info) => {
                     container_exists = true;
-                    container_running = info.state == "running";
+                    container_running = info.state
+                        .as_ref()
+                        .and_then(|state| state.status.as_ref())
+                        .map(|status| matches!(status, bollard::models::ContainerStateStatusEnum::RUNNING))
+                        .unwrap_or(false);
                     
                     if !container_running {
                         recovery_actions.push(RecoveryAction::RestartContainer);
                     }
                 }
-                Ok(None) => {
-                    // Container doesn't exist but session expects it
-                    recovery_actions.push(RecoveryAction::RecreateContainer);
-                }
                 Err(e) => {
                     warn!("Failed to get container info for {}: {}", container_id, e);
+                    // Container doesn't exist but session expects it
                     recovery_actions.push(RecoveryAction::RecreateContainer);
                 }
             }
@@ -276,10 +277,15 @@ impl SessionRecoveryService {
         let runtime = session.runtime.as_ref().unwrap_or(&"python".to_string()).clone();
         
         // Create container with session's environment and working directory
+        // Convert HashMap to Vec for bollard
+        let env_vec: Vec<String> = session.environment.iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect();
+            
         let container_config = bollard::container::Config {
-            image: self.get_runtime_image(&runtime),
+            image: Some(self.get_runtime_image(&runtime)),
             working_dir: Some(session.working_directory.clone()),
-            environment: session.environment.clone(),
+            env: Some(env_vec),
             ..Default::default()
         };
         
@@ -387,16 +393,16 @@ impl SessionRecoveryService {
         let containers = self.container_manager.list_containers().await?;
         
         for container in containers {
-            if container.state == "running" {
+            if container.status == "running" {
                 // Try to find session associated with this container
-                match self.session_manager.get_session_by_container(&container.id).await? {
+                match self.session_manager.get_session_by_container(&container.container_id).await? {
                     Some(session) => {
                         if session.is_active && !session.is_expired() {
                             sessions.push(session);
                         }
                     }
                     None => {
-                        debug!("Container {} has no associated session", container.id);
+                        debug!("Container {} has no associated session", container.container_id);
                     }
                 }
             }

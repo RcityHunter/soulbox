@@ -116,9 +116,9 @@ pub fn create_billing_routes() -> Router<BillingApiState> {
 
 /// Get usage summary for the authenticated user
 async fn get_usage_summary(
-    auth: AuthContext,
     Query(params): Query<UsageQuery>,
     State(state): State<BillingApiState>,
+    auth: AuthContext,
 ) -> Result<Json<UsageSummaryResponse>> {
     let user_id = auth.user_id;
     

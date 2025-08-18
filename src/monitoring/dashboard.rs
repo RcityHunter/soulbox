@@ -170,7 +170,7 @@ pub struct DashboardQuery {
 }
 
 /// Dashboard response data
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct DashboardResponse {
     pub time_series: Vec<TimeSeries>,
     pub alerts: Vec<Alert>,

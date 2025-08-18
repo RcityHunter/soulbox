@@ -84,10 +84,12 @@ impl UserRepository {
             .map_err(|e| DatabaseError::Query(format!("查询用户失败: {}", e)))?;
         
         let users: Vec<SurrealUser> = response
-            .take(0)
+            .take::<Vec<SurrealUser>>(0usize)
             .map_err(|e| DatabaseError::Query(format!("解析查询结果失败: {}", e)))?;
         
-        if let Some(surreal_user) = users.into_iter().next() {
+        let user = users.into_iter().next();
+        
+        if let Some(surreal_user) = user {
             let db_user = self.surreal_to_db_user(surreal_user)?;
             Ok(Some(db_user))
         } else {
@@ -112,10 +114,12 @@ impl UserRepository {
             .map_err(|e| DatabaseError::Query(format!("查询用户失败: {}", e)))?;
         
         let users: Vec<SurrealUser> = response
-            .take(0)
+            .take::<Vec<SurrealUser>>(0usize)
             .map_err(|e| DatabaseError::Query(format!("解析查询结果失败: {}", e)))?;
         
-        if let Some(surreal_user) = users.into_iter().next() {
+        let user = users.into_iter().next();
+        
+        if let Some(surreal_user) = user {
             let db_user = self.surreal_to_db_user(surreal_user)?;
             Ok(Some(db_user))
         } else {
@@ -140,10 +144,12 @@ impl UserRepository {
             .map_err(|e| DatabaseError::Query(format!("查询用户失败: {}", e)))?;
         
         let users: Vec<SurrealUser> = response
-            .take(0)
+            .take::<Vec<SurrealUser>>(0usize)
             .map_err(|e| DatabaseError::Query(format!("解析查询结果失败: {}", e)))?;
         
-        if let Some(surreal_user) = users.into_iter().next() {
+        let user = users.into_iter().next();
+        
+        if let Some(surreal_user) = user {
             let db_user = self.surreal_to_db_user(surreal_user)?;
             Ok(Some(db_user))
         } else {
@@ -184,10 +190,11 @@ impl UserRepository {
             .map_err(|e| DatabaseError::Query(format!("更新用户失败: {}", e)))?;
         
         // Try to take the first result to check if update was successful
-        let result: Result<Option<serde_json::Value>, _> = response.take(0);
-        match result {
-            Ok(Some(_)) => {}, // Update successful
-            Ok(None) | Err(_) => return Err(DatabaseError::NotFound),
+        let result: Vec<serde_json::Value> = response.take::<Vec<serde_json::Value>>(0usize)
+            .map_err(|e| DatabaseError::Query(format!("更新失败: {}", e)))?;
+        
+        if result.is_empty() {
+            return Err(DatabaseError::NotFound);
         }
         
         info!("Updated user: {}", user.username);
@@ -214,10 +221,11 @@ impl UserRepository {
             .map_err(|e| DatabaseError::Query(format!("更新密码失败: {}", e)))?;
         
         // Try to take the first result to check if update was successful
-        let result: Result<Option<serde_json::Value>, _> = response.take(0);
-        match result {
-            Ok(Some(_)) => {}, // Update successful
-            Ok(None) | Err(_) => return Err(DatabaseError::NotFound),
+        let result: Vec<serde_json::Value> = response.take::<Vec<serde_json::Value>>(0usize)
+            .map_err(|e| DatabaseError::Query(format!("更新失败: {}", e)))?;
+        
+        if result.is_empty() {
+            return Err(DatabaseError::NotFound);
         }
         
         Ok(())
@@ -263,10 +271,11 @@ impl UserRepository {
             .map_err(|e| DatabaseError::Query(format!("删除用户失败: {}", e)))?;
         
         // Try to take the first result to check if delete was successful
-        let result: Result<Option<serde_json::Value>, _> = response.take(0);
-        match result {
-            Ok(Some(_)) => {}, // Delete successful
-            Ok(None) | Err(_) => return Err(DatabaseError::NotFound),
+        let result: Vec<serde_json::Value> = response.take::<Vec<serde_json::Value>>(0usize)
+            .map_err(|e| DatabaseError::Query(format!("删除失败: {}", e)))?;
+        
+        if result.is_empty() {
+            return Err(DatabaseError::NotFound);
         }
         
         info!("Deleted user: {}", user_id);
@@ -295,7 +304,7 @@ impl UserRepository {
             .map_err(|e| DatabaseError::Query(format!("查询租户用户失败: {}", e)))?;
         
         let surreal_users: Vec<SurrealUser> = response
-            .take(0)
+            .take::<Vec<SurrealUser>>(0usize)
             .map_err(|e| DatabaseError::Query(format!("解析查询结果失败: {}", e)))?;
         
         let mut db_users = Vec::new();
@@ -325,11 +334,11 @@ impl UserRepository {
             .map_err(|e| DatabaseError::Query(format!("统计用户数失败: {}", e)))?;
         
         let results: Vec<serde_json::Value> = response
-            .take(0)
+            .take(0usize)
             .map_err(|e| DatabaseError::Query(format!("解析统计结果失败: {}", e)))?;
         
         let count = if let Some(count_value) = results.first() {
-            count_value.as_int() as i64
+            count_value.as_i64().unwrap_or(0)
         } else {
             0
         };

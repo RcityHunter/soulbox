@@ -53,10 +53,10 @@ impl SystemResourceCollector {
         };
 
         // Collect CPU metrics
-        let cpu_usage = self.system.global_cpu_info().cpu_usage() as f64;
+        let cpu_usage = self.system.global_cpu_usage() as f64;
         
         // Collect load average
-        let load_average = self.system.load_average().one;
+        let load_average = sysinfo::System::load_average().one;
 
         // Update metrics
         self.metrics.update_system_metrics(memory_percent, cpu_usage, load_average);
@@ -86,7 +86,7 @@ impl SystemResourceCollector {
 
     /// Get detailed CPU information
     pub fn get_cpu_info(&mut self) -> Vec<CpuInfo> {
-        self.system.refresh_cpu();
+        self.system.refresh_cpu_all();
         
         self.system.cpus().iter().enumerate().map(|(index, cpu)| {
             CpuInfo {
@@ -101,18 +101,18 @@ impl SystemResourceCollector {
 
     /// Get process information for SoulBox processes
     pub fn get_process_info(&mut self) -> Vec<ProcessInfo> {
-        self.system.refresh_processes();
+        self.system.refresh_processes_specifics(sysinfo::ProcessesToUpdate::All, sysinfo::ProcessRefreshKind::everything());
         
         let current_pid = std::process::id();
         self.system.processes().iter()
             .filter(|(_, process)| {
                 let name = process.name();
-                name.contains("soulbox") || process.pid().as_u32() == current_pid
+                name.to_string_lossy().contains("soulbox") || process.pid().as_u32() == current_pid
             })
             .map(|(pid, process)| {
                 ProcessInfo {
                     pid: pid.as_u32(),
-                    name: process.name().to_string(),
+                    name: process.name().to_string_lossy().to_string(),
                     cpu_usage: process.cpu_usage() as f64,
                     memory_usage: process.memory(),
                     virtual_memory: process.virtual_memory(),
@@ -193,29 +193,33 @@ impl ContainerResourceCollector {
 
         // Get list of running containers
         let containers = self.container_manager.list_containers().await?;
-        let running_count = containers.iter().filter(|c| c.state == "running").count() as i64;
+        let running_count = containers.iter().filter(|c| c.status == "running").count() as i64;
         
         self.metrics.set_containers_running(running_count);
 
         // Collect resource usage for each container
         for container in containers {
-            if container.state == "running" {
-                match self.container_manager.get_container_stats(&container.id).await {
-                    Ok(Some(stats)) => {
-                        let runtime = container.labels.get("runtime").cloned().unwrap_or_default();
+            if container.status == "running" {
+                match self.container_manager.get_container_stats(&container.container_id).await {
+                    Ok(stats) => {
+                        // ContainerInfo doesn't have labels field, use image as runtime identifier
+                        let runtime = container.image.clone();
+                        
+                        // Get memory usage from stats structure
+                        let memory_usage = stats.memory_stats.usage.unwrap_or(0) as f64;
+                            
+                        // Calculate CPU percentage (simplified)
+                        let cpu_percent = stats.cpu_stats.cpu_usage.total_usage as f64 / 1000000.0;
                         
                         self.metrics.record_container_resources(
-                            &container.id,
+                            &container.container_id,
                             &runtime,
-                            stats.memory_usage as f64,
-                            stats.cpu_percent,
+                            memory_usage,
+                            cpu_percent,
                         );
                     }
-                    Ok(None) => {
-                        tracing::debug!("No stats available for container {}", container.id);
-                    }
                     Err(e) => {
-                        tracing::warn!("Failed to get stats for container {}: {}", container.id, e);
+                        tracing::warn!("Failed to get stats for container {}: {}", container.container_id, e);
                     }
                 }
             }
@@ -365,28 +369,25 @@ impl MetricsCollectionService {
         let running = self.running.clone();
         let collection_interval = self.collection_interval;
         
+        // Extract values before the replace operations
+        let system_metrics = self.system_collector.metrics.clone();
+        let container_manager = self.container_collector.container_manager.clone();
+        let container_metrics = self.container_collector.metrics.clone();
+        let session_manager = self.session_collector.session_manager.clone();
+        let session_metrics = self.session_collector.metrics.clone();
+        
         // Move the collectors into the background task
         let mut system_collector = std::mem::replace(
             &mut self.system_collector,
-            SystemResourceCollector::new(
-                self.system_collector.metrics.clone(),
-                collection_interval
-            )
+            SystemResourceCollector::new(system_metrics, collection_interval)
         );
         let mut container_collector = std::mem::replace(
             &mut self.container_collector,
-            ContainerResourceCollector::new(
-                self.container_collector.container_manager.clone(),
-                self.container_collector.metrics.clone(),
-                collection_interval
-            )
+            ContainerResourceCollector::new(container_manager, container_metrics, collection_interval)
         );
         let mut session_collector = std::mem::replace(
             &mut self.session_collector,
-            SessionMetricsCollector::new(
-                self.session_collector.session_manager.clone(),
-                self.session_collector.metrics.clone(),
-                collection_interval
+            SessionMetricsCollector::new(session_manager, session_metrics, collection_interval
             )
         );
 
@@ -466,6 +467,7 @@ impl MetricsCollectionService {
 }
 
 /// Custom metric for tracking application-specific metrics
+#[derive(Clone)]
 pub struct CustomMetric {
     pub name: String,
     pub value: f64,

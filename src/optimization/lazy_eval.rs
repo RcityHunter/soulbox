@@ -33,7 +33,7 @@ impl<T> LazyValue<T> {
     /// Get the value, computing it if necessary
     pub async fn get(&self) -> &T {
         self.cell
-            .get_or_init(|| {
+            .get_or_init(|| async {
                 if let Some(ref init) = self.initializer {
                     init()
                 } else {
@@ -358,21 +358,23 @@ where
 {
     type Output = T;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = unsafe { self.get_unchecked_mut() };
+        
         // If we already have the result, return it
-        if let Some(ref result) = self.result {
+        if let Some(ref result) = this.result {
             return Poll::Ready(result.clone());
         }
 
         // Poll the inner future
-        if let Some(mut inner) = self.inner.take() {
+        if let Some(mut inner) = this.inner.take() {
             match inner.as_mut().poll(cx) {
                 Poll::Ready(result) => {
-                    self.result = Some(result.clone());
+                    this.result = Some(result.clone());
                     Poll::Ready(result)
                 }
                 Poll::Pending => {
-                    self.inner = Some(inner);
+                    this.inner = Some(inner);
                     Poll::Pending
                 }
             }

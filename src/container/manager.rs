@@ -455,6 +455,41 @@ impl ContainerManager {
     pub async fn get_container_info(&self, container_id: &str) -> Result<bollard::models::ContainerInspectResponse> {
         Ok(self.docker.inspect_container(container_id, None).await?)
     }
+
+    /// Restart a container
+    pub async fn restart_container(&self, container_id: &str) -> Result<()> {
+        self.docker
+            .restart_container(container_id, None::<bollard::container::RestartContainerOptions>)
+            .await?;
+        Ok(())
+    }
+
+    /// Get container statistics
+    pub async fn get_container_stats(&self, container_id: &str) -> Result<bollard::container::Stats> {
+        use bollard::container::StatsOptions;
+        use futures_util::StreamExt;
+        
+        let options = StatsOptions {
+            stream: false,
+            one_shot: true,
+        };
+        
+        let mut stats_stream = self.docker.stats(container_id, Some(options));
+        
+        if let Some(Ok(stats)) = stats_stream.next().await {
+            Ok(stats)
+        } else {
+            Err(crate::error::SoulBoxError::Internal("Failed to get container stats".to_string()))
+        }
+    }
+
+    /// Remove a container by ID
+    pub async fn remove_container_by_id(&self, container_id: &str) -> Result<()> {
+        self.docker
+            .remove_container(container_id, None::<bollard::container::RemoveContainerOptions>)
+            .await?;
+        Ok(())
+    }
 }
 
 /// Convert NetworkError to SoulBoxError

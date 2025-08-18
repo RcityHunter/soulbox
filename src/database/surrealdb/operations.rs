@@ -48,7 +48,7 @@ impl<'a> SurrealOperations<'a> {
             .map_err(|e| SurrealConnectionError::Query(format!("创建记录失败: {}", e)))?;
         
         let result: Option<T> = response
-            .take(0)
+            .take(0usize)
             .map_err(|e| SurrealConnectionError::Query(format!("解析创建结果失败: {}", e)))?;
         
         result.ok_or_else(|| SurrealConnectionError::Query("创建记录返回空结果".to_string()))
@@ -69,7 +69,7 @@ impl<'a> SurrealOperations<'a> {
             .map_err(|e| SurrealConnectionError::Query(format!("查询记录失败: {}", e)))?;
         
         let result: Option<T> = response
-            .take(0)
+            .take(0usize)
             .map_err(|e| SurrealConnectionError::Query(format!("解析查询结果失败: {}", e)))?;
         
         Ok(result)
@@ -91,7 +91,7 @@ impl<'a> SurrealOperations<'a> {
             .map_err(|e| SurrealConnectionError::Query(format!("更新记录失败: {}", e)))?;
         
         let result: Option<T> = response
-            .take(0)
+            .take(0usize)
             .map_err(|e| SurrealConnectionError::Query(format!("解析更新结果失败: {}", e)))?;
         
         result.ok_or_else(|| SurrealConnectionError::Query("更新记录返回空结果".to_string()))
@@ -109,7 +109,7 @@ impl<'a> SurrealOperations<'a> {
             .map_err(|e| SurrealConnectionError::Query(format!("删除记录失败: {}", e)))?;
         
         // 检查是否有记录被删除
-        let result: Result<Option<serde_json::Value>, _> = response.take(0);
+        let result: Result<Option<serde_json::Value>, _> = response.take::<Option<serde_json::Value>>(0usize);
         Ok(result.is_ok() && result.unwrap().is_some())
     }
     
@@ -128,7 +128,7 @@ impl<'a> SurrealOperations<'a> {
             .map_err(|e| SurrealConnectionError::Query(format!("查询失败: {}", e)))?;
         
         let result: Vec<T> = response
-            .take(0)
+            .take(0usize)
             .map_err(|e| SurrealConnectionError::Query(format!("解析查询结果失败: {}", e)))?;
         
         Ok(result)
@@ -156,7 +156,7 @@ impl<'a> SurrealOperations<'a> {
             .map_err(|e| SurrealConnectionError::Query(format!("分页查询失败: {}", e)))?;
         
         let items: Vec<T> = response
-            .take(0)
+            .take(0usize)
             .map_err(|e| SurrealConnectionError::Query(format!("解析查询结果失败: {}", e)))?;
         
         let count_result: Vec<serde_json::Value> = response
@@ -164,7 +164,7 @@ impl<'a> SurrealOperations<'a> {
             .map_err(|e| SurrealConnectionError::Query(format!("解析计数结果失败: {}", e)))?;
         
         let total = if let Some(count_value) = count_result.first() {
-            count_value.as_int() as i64
+            count_value.as_i64().unwrap_or(0)
         } else {
             0
         };
@@ -195,7 +195,7 @@ impl<'a> SurrealOperations<'a> {
             .map_err(|e| SurrealConnectionError::Query(format!("更新失败: {}", e)))?;
         
         let result: Vec<T> = response
-            .take(0)
+            .take(0usize)
             .map_err(|e| SurrealConnectionError::Query(format!("解析更新结果失败: {}", e)))?;
         
         Ok(result)
@@ -214,7 +214,7 @@ impl<'a> SurrealOperations<'a> {
             .map_err(|e| SurrealConnectionError::Query(format!("原始查询失败: {}", e)))?;
         
         let result: Vec<T> = response
-            .take(0)
+            .take(0usize)
             .map_err(|e| SurrealConnectionError::Query(format!("解析查询结果失败: {}", e)))?;
         
         Ok(result)
@@ -271,7 +271,8 @@ pub fn record_id_to_uuid(record_id: &str) -> Result<Uuid, uuid::Error> {
     if let Some(uuid_str) = record_id.split(':').last() {
         uuid_str.parse()
     } else {
-        Err(uuid::Error::InvalidLength(record_id.len()))
+        // Return an error by trying to parse an invalid string
+        "invalid-uuid".parse()
     }
 }
 

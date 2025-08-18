@@ -169,6 +169,7 @@ pub enum NetworkError {
 }
 
 /// Port service for managing port allocations
+#[derive(Debug)]
 pub struct PortService {
     port_manager: PortMappingManager,
 }
@@ -195,6 +196,7 @@ impl PortService {
 }
 
 /// Proxy service for managing HTTP/HTTPS proxies
+#[derive(Debug)]
 pub struct ProxyService {
     proxy_manager: ProxyManager,
 }
@@ -222,6 +224,7 @@ impl ProxyService {
 }
 
 /// Statistics collector for network monitoring
+#[derive(Debug)]
 pub struct StatsCollector {
     network_stats: HashMap<String, NetworkStats>,
 }
@@ -247,6 +250,7 @@ impl StatsCollector {
 }
 
 /// Main network manager that coordinates separate services
+#[derive(Debug)]
 pub struct NetworkManager {
     port_service: PortService,
     proxy_service: ProxyService,

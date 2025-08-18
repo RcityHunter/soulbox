@@ -79,6 +79,7 @@ pub struct OptimizationResult {
 }
 
 /// Main optimization manager
+#[derive(Clone)]
 pub struct OptimizationManager {
     config: OptimizationConfig,
     cpu_optimizer: cpu_optimizer::CpuOptimizer,
@@ -267,7 +268,8 @@ impl OptimizationManager {
             
             // Keep only the last 100 results
             if results.len() > 100 {
-                results.drain(0..results.len() - 100);
+                let drain_count = results.len() - 100;
+                results.drain(0..drain_count);
             }
         }
 

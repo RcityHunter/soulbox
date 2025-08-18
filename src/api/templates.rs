@@ -99,7 +99,7 @@ async fn list_public_templates(
     let page_size = params.page_size.unwrap_or(20).min(100);
     let runtime_type = params.runtime_type.as_deref();
 
-    match template_state.template_manager.list_public_templates(runtime_type, page, page_size).await {
+    match template_state.template_manager.list_public_templates(runtime_type, page as usize, page_size as usize).await {
         Ok(templates) => {
             let response = json!({
                 "templates": templates,
@@ -163,8 +163,7 @@ async fn create_template(
 
     match template_state.template_manager.create_template(
         request,
-        Some(auth.0.user_id),
-        auth.0.tenant_id,
+        auth.0.user_id,
     ).await {
         Ok(template) => {
             let response = json!({
@@ -194,7 +193,7 @@ async fn list_my_templates(
     let page = params.page.unwrap_or(1);
     let page_size = params.page_size.unwrap_or(20).min(100);
 
-    match template_state.template_manager.list_user_templates(auth.0.user_id, page, page_size).await {
+    match template_state.template_manager.list_user_templates(auth.0.user_id, page as usize, page_size as usize).await {
         Ok(templates) => {
             let response = json!({
                 "templates": templates,
@@ -230,7 +229,7 @@ async fn update_template(
 
     info!("User {} updating template: {}", auth.0.username, id);
 
-    match template_state.template_manager.update_template(id, request, auth.0.user_id).await {
+    match template_state.template_manager.update_template(id, request).await {
         Ok(template) => {
             let response = json!({
                 "template": template,
@@ -263,7 +262,7 @@ async fn delete_template(
 
     info!("User {} deleting template: {}", auth.0.username, id);
 
-    match template_state.template_manager.delete_template(id, auth.0.user_id).await {
+    match template_state.template_manager.delete_template(id).await {
         Ok(_) => {
             let response = json!({
                 "message": "Template deleted successfully",
@@ -299,10 +298,7 @@ async fn clone_template(
 
     match template_state.template_manager.clone_template(
         id,
-        request.name,
-        request.slug,
         auth.0.user_id,
-        auth.0.tenant_id,
     ).await {
         Ok(template) => {
             let response = json!({

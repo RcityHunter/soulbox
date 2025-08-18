@@ -303,16 +303,16 @@ impl CpuOptimizer {
                 // Refresh system information
                 {
                     let mut sys = system.write();
-                    sys.refresh_cpu();
+                    sys.refresh_cpu_all();
                     sys.refresh_memory();
                 }
 
                 // Calculate current CPU usage
                 let (cpu_percent, per_core_usage, load_average) = {
                     let sys = system.read();
-                    let cpu_percent = sys.global_cpu_info().cpu_usage();
+                    let cpu_percent = sys.global_cpu_usage();
                     let per_core_usage: Vec<f32> = sys.cpus().iter().map(|cpu| cpu.cpu_usage()).collect();
-                    let load_average = sys.load_average().one;
+                    let load_average = sysinfo::System::load_average().one;
                     (cpu_percent, per_core_usage, load_average)
                 };
 

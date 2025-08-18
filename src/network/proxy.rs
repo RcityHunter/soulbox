@@ -322,6 +322,7 @@ pub struct ProxyStats {
 }
 
 /// Proxy manager for handling multiple proxy instances
+#[derive(Debug)]
 pub struct ProxyManager {
     /// Active proxy configurations by sandbox ID
     proxies: Arc<Mutex<HashMap<String, ProxyConfig>>>,

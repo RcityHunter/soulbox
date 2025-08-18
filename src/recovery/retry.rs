@@ -139,6 +139,9 @@ impl RetryManager {
                     return Ok(value);
                 }
                 Err(e) => {
+                    // Store error message before downcast
+                    let error_msg = e.to_string();
+                    
                     // Store the error for potential return
                     if let Ok(original_error) = e.downcast::<E>() {
                         last_error = Some(original_error);
@@ -170,7 +173,7 @@ impl RetryManager {
                         operation = operation_name,
                         attempt = attempt,
                         delay_ms = delay.as_millis(),
-                        error = %e,
+                        error = error_msg,
                         "Operation failed, retrying after delay"
                     );
 

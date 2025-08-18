@@ -46,6 +46,9 @@ pub enum DebugError {
     
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    
+    #[error("Breakpoint error: {0}")]
+    BreakpointError(#[from] breakpoint::BreakpointError),
 }
 
 /// Supported programming languages for debugging
@@ -110,6 +113,12 @@ pub enum DebugEvent {
     SessionTerminated {
         session_id: String,
         reason: String,
+    },
+    /// Step completed
+    StepCompleted {
+        session_id: String,
+        file_path: String,
+        line_number: u32,
     },
 }
 
@@ -485,7 +494,6 @@ impl DebugManager {
                 breakpoint_id: breakpoint_id.to_string(),
                 file_path: file_path.to_string(),
                 line_number,
-                thread_id: None,
             });
         }
         

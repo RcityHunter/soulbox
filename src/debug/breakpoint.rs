@@ -575,7 +575,20 @@ impl BreakpointManager {
     }
     
     /// Evaluate a boolean expression using variable context
-    async fn evaluate_expression(&self, expr: &str, context: &BreakpointContext) -> Result<bool, String> {
+    fn evaluate_expression<'a>(&'a self, expr: &'a str, context: &'a BreakpointContext) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, String>> + Send + 'a>> {
+        Box::pin(async move {
+            self.evaluate_expression_recursive(expr, context, 0).await
+        })
+    }
+
+    // Internal recursive method with depth limiting to prevent infinite recursion
+    async fn evaluate_expression_recursive(&self, expr: &str, context: &BreakpointContext, depth: u32) -> Result<bool, String> {
+        // Prevent infinite recursion by limiting depth
+        const MAX_RECURSION_DEPTH: u32 = 10;
+        if depth > MAX_RECURSION_DEPTH {
+            return Err("Expression evaluation depth exceeded".to_string());
+        }
+
         let expr = expr.trim();
         
         // Handle empty expression
@@ -603,8 +616,8 @@ impl BreakpointManager {
             return result;
         }
         
-        // Handle logical operators
-        if let Some(result) = self.evaluate_logical_expression(expr, context).await {
+        // Handle logical operators with depth control
+        if let Some(result) = self.evaluate_logical_expression_with_depth(expr, context, depth + 1).await {
             return result;
         }
         
@@ -649,14 +662,14 @@ impl BreakpointManager {
     }
     
     /// Evaluate logical expressions (&&, ||)
-    async fn evaluate_logical_expression(&self, expr: &str, context: &BreakpointContext) -> Option<Result<bool, String>> {
+    async fn evaluate_logical_expression_with_depth(&self, expr: &str, context: &BreakpointContext, depth: u32) -> Option<Result<bool, String>> {
         // Handle AND operator
         if let Some(idx) = expr.find("&&") {
             let left = expr[..idx].trim();
             let right = expr[idx + 2..].trim();
             
-            let left_result = self.evaluate_expression(left, context).await;
-            let right_result = self.evaluate_expression(right, context).await;
+            let left_result = self.evaluate_expression_recursive(left, context, depth).await;
+            let right_result = self.evaluate_expression_recursive(right, context, depth).await;
             
             return Some(match (left_result, right_result) {
                 (Ok(left_val), Ok(right_val)) => Ok(left_val && right_val),
@@ -669,8 +682,8 @@ impl BreakpointManager {
             let left = expr[..idx].trim();
             let right = expr[idx + 2..].trim();
             
-            let left_result = self.evaluate_expression(left, context).await;
-            let right_result = self.evaluate_expression(right, context).await;
+            let left_result = self.evaluate_expression_recursive(left, context, depth).await;
+            let right_result = self.evaluate_expression_recursive(right, context, depth).await;
             
             return Some(match (left_result, right_result) {
                 (Ok(left_val), Ok(right_val)) => Ok(left_val || right_val),

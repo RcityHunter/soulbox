@@ -127,7 +127,7 @@ impl BillingStorage {
 
                     let mut conn = redis.get_multiplexed_async_connection().await
                         .to_billing_error("redis_connection")?;
-                    let _: () = conn.set_ex(&cache_key, config.cache_ttl, data).await
+                    let _: () = conn.set_ex(&cache_key, &data, config.cache_ttl).await
                         .to_billing_error("redis_setex")?;
 
                     // Add to session metrics sorted set
@@ -154,13 +154,16 @@ impl BillingStorage {
 
         // Batch store in SurrealDB
         for chunk in metrics.chunks(self.config.batch_size) {
-            let futures: Vec<_> = chunk.iter().map(|metric| {
-                self.surrealdb.create(("usage_metrics", &metric.id.to_string())).content(metric)
-            }).collect();
+            let mut futures = Vec::new();
+            for metric in chunk {
+                let future = self.surrealdb.create::<Option<UsageMetric>>(("usage_metrics", &metric.id.to_string())).content(metric);
+                futures.push(future);
+            }
 
             // Execute all inserts concurrently
-            futures_util::future::try_join_all(futures).await
-                .context("Failed to batch store metrics in SurrealDB")?;
+            for future in futures {
+                future.await.context("Failed to store metric in SurrealDB")?;
+            }
         }
 
         // Batch cache in Redis
@@ -172,7 +175,7 @@ impl BillingStorage {
             let data = serde_json::to_string(metric)
                 .context("Failed to serialize metric for batch")?;
 
-            pipe.set_ex(&cache_key, self.config.cache_ttl, data);
+            pipe.set_ex(&cache_key, &data, self.config.cache_ttl);
 
             // Add to session and user sorted sets
             let session_key = format!("session:{}:metrics", metric.session_id);
@@ -258,7 +261,7 @@ impl BillingStorage {
 
         let metrics: Vec<UsageMetric> = query.await
             .context("Failed to query user metrics")?
-            .take(0)
+            .take(0usize)
             .context("Failed to parse user metrics query result")?;
 
         Ok(metrics)
@@ -285,7 +288,7 @@ impl BillingStorage {
             .context("Failed to serialize summary")?;
 
         let mut conn = self.redis.get_multiplexed_async_connection().await?;
-        let _: () = conn.set_ex(&cache_key, self.config.cache_ttl * 24, data).await?; // Longer TTL for summaries
+        let _: () = conn.set_ex(&cache_key, &data, self.config.cache_ttl * 24).await?; // Longer TTL for summaries
 
         // Add to user summaries index
         let user_summaries_key = format!("user:{}:summaries", summary.user_id);
@@ -308,7 +311,7 @@ impl BillingStorage {
             .bind(("end_time", end_time))
             .await
             .context("Failed to query user summaries")?
-            .take(0)
+            .take(0usize)
             .context("Failed to parse user summaries query result")?;
 
         Ok(summaries)
@@ -328,7 +331,7 @@ impl BillingStorage {
             .context("Failed to serialize billing record")?;
 
         let mut conn = self.redis.get_multiplexed_async_connection().await?;
-        let _: () = conn.set_ex(&cache_key, self.config.cache_ttl * 24 * 7, data).await?; // 1 week TTL
+        let _: () = conn.set_ex(&cache_key, &data, self.config.cache_ttl * 24 * 7).await?; // 1 week TTL
 
         // Add to user billing records index
         let user_billing_key = format!("user:{}:billing", record.user_id);
@@ -379,7 +382,7 @@ impl BillingStorage {
 
         let records: Vec<BillingRecord> = query.await
             .context("Failed to query billing records")?
-            .take(0)
+            .take(0usize)
             .context("Failed to parse billing records query result")?;
 
         Ok(records)
@@ -399,7 +402,7 @@ impl BillingStorage {
             .context("Failed to serialize invoice")?;
 
         let mut conn = self.redis.get_multiplexed_async_connection().await?;
-        let _: () = conn.set_ex(&cache_key, self.config.cache_ttl * 24 * 30, data).await?; // 30 days TTL
+        let _: () = conn.set_ex(&cache_key, &data, self.config.cache_ttl * 24 * 30).await?; // 30 days TTL
 
         // Add to user invoices index
         let user_invoices_key = format!("user:{}:invoices", invoice.user_id);
@@ -421,7 +424,7 @@ impl BillingStorage {
             .bind(("updated_at", Utc::now()))
             .await
             .context("Failed to update invoice status")?
-            .take(0)
+            .take(0usize)
             .context("Failed to parse invoice update result")?;
 
         // Update cache
@@ -447,7 +450,7 @@ impl BillingStorage {
 
         let invoices: Vec<Invoice> = query.await
             .context("Failed to query invoices by status")?
-            .take(0)
+            .take(0usize)
             .context("Failed to parse invoices by status query result")?;
 
         Ok(invoices)
@@ -490,7 +493,7 @@ impl BillingStorage {
 
         let invoices: Vec<Invoice> = query.await
             .context("Failed to query user invoices")?
-            .take(0)
+            .take(0usize)
             .context("Failed to parse user invoices query result")?;
 
         Ok(invoices)
@@ -517,7 +520,7 @@ impl BillingStorage {
             .bind(("end_time", end_time))
             .await
             .context("Failed to query billing stats")?
-            .take(0)
+            .take(0usize)
             .context("Failed to parse billing stats query result")?;
 
         let stats = result.into_iter().next().unwrap_or_default();
@@ -586,7 +589,7 @@ impl BillingStorage {
         for query in schema_queries {
             let _: Vec<Thing> = self.surrealdb.query(query).await
                 .with_context(|| format!("Failed to execute schema query: {}", query))?
-                .take(0)?;
+                .take(0usize)?;
         }
 
         Ok(())
@@ -603,7 +606,7 @@ impl BillingStorage {
             .bind(("metric_id", metric_id))
             .await
             .context("Failed to load metric from database")?
-            .take(0)
+            .take(0usize)
             .context("Failed to parse metric query result")?;
 
         Ok(metrics.into_iter().next())

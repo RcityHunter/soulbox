@@ -253,19 +253,22 @@ impl NodeJSRuntime {
     pub fn create_container_config(&self, context: &ExecutionContext) -> Result<Config<String>> {
         let runtime_config = self.create_runtime_config();
         
-        let mut config = Config {
-            image: runtime_config.docker_image,
+        // Convert HashMap to Vec for bollard
+        let mut env_vec: Vec<String> = context.environment.iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect();
+            
+        // Add runtime-specific environment variables
+        for (key, value) in &runtime_config.environment {
+            env_vec.push(format!("{}={}", key, value));
+        }
+        
+        let config = Config {
+            image: Some(runtime_config.docker_image),
             working_dir: Some(context.working_dir.clone()),
-            environment: context.environment.clone(),
-            memory_limit: runtime_config.memory_limit,
-            cpu_limit: runtime_config.cpu_limit,
+            env: Some(env_vec),
             ..Default::default()
         };
-
-        // Add Node.js-specific environment variables
-        for (key, value) in &runtime_config.environment {
-            config.environment.insert(key.clone(), value.clone());
-        }
 
         Ok(config)
     }
@@ -549,8 +552,8 @@ mod tests {
         let runtime_config = runtime.create_runtime_config();
         
         assert_eq!(runtime_config.runtime_type, RuntimeType::NodeJS);
-        assert!(runtime_config.supports_extension("js"));
-        assert!(runtime_config.supports_extension("ts"));
+        assert!(runtime_config.file_extensions.contains(&"js".to_string()));
+        assert!(runtime_config.file_extensions.contains(&"ts".to_string()));
         assert!(runtime_config.environment.contains_key("NODE_ENV"));
     }
 

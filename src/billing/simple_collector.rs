@@ -71,7 +71,7 @@ pub struct SimpleMetricsCollector {
     buffer: Arc<Mutex<SimpleMetricBuffer>>,
     metrics_tx: mpsc::UnboundedSender<UsageMetric>,
     real_time_metrics: Arc<Mutex<BillingMetrics>>,
-    error_count: AtomicU64,
+    error_count: Arc<AtomicU64>,
     recovery_service: Arc<ErrorRecoveryService>,
 }
 
@@ -98,7 +98,7 @@ impl SimpleMetricsCollector {
             buffer: Arc::new(Mutex::new(SimpleMetricBuffer::new(config.buffer_size))),
             metrics_tx,
             real_time_metrics: Arc::new(Mutex::new(real_time_metrics)),
-            error_count: AtomicU64::new(0),
+            error_count: Arc::new(AtomicU64::new(0)),
             recovery_service,
         };
 
@@ -233,7 +233,7 @@ impl SimpleMetricsCollector {
         let buffer = self.buffer.clone();
         let storage = self.storage.clone();
         let running = self.running.clone();
-        let error_count = &self.error_count;
+        let error_count = self.error_count.clone();
 
         tokio::spawn(async move {
             while running.load(Ordering::Relaxed) {

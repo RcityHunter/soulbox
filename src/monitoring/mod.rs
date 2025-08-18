@@ -114,7 +114,7 @@ impl PerformanceMetrics {
         self.container_startup_times.push(duration);
         
         // Implement circular buffer behavior
-        self.maintain_circular_buffer(&mut self.container_startup_times, 100);
+        Self::maintain_circular_buffer(&mut self.container_startup_times, 100);
     }
 
     /// Record API request latency
@@ -125,7 +125,7 @@ impl PerformanceMetrics {
         latencies.push(duration);
         
         // Maintain circular buffer for each endpoint
-        self.maintain_circular_buffer(latencies, 100);
+        Self::maintain_circular_buffer(latencies, 100);
     }
 
     /// Record execution time
@@ -133,7 +133,7 @@ impl PerformanceMetrics {
         self.execution_times.push(duration);
         
         // Implement circular buffer behavior
-        self.maintain_circular_buffer(&mut self.execution_times, 100);
+        Self::maintain_circular_buffer(&mut self.execution_times, 100);
     }
 
     /// Record memory usage
@@ -146,7 +146,7 @@ impl PerformanceMetrics {
         });
         
         // Use time-based window management for resource metrics
-        self.maintain_time_window(&mut self.memory_usage, Duration::from_secs(3600)); // 1 hour
+        maintain_time_window(&mut self.memory_usage, Duration::from_secs(3600)); // 1 hour
     }
 
     /// Record CPU usage
@@ -158,7 +158,7 @@ impl PerformanceMetrics {
         });
         
         // Use time-based window management for resource metrics
-        self.maintain_time_window(&mut self.cpu_usage, Duration::from_secs(3600)); // 1 hour
+        maintain_time_window(&mut self.cpu_usage, Duration::from_secs(3600)); // 1 hour
     }
 
     /// Get average container startup time
@@ -207,14 +207,14 @@ impl PerformanceMetrics {
     }
 
     /// Maintain circular buffer with fixed size
-    fn maintain_circular_buffer<T>(&self, buffer: &mut Vec<T>, max_size: usize) {
+    fn maintain_circular_buffer<T>(buffer: &mut Vec<T>, max_size: usize) {
         while buffer.len() > max_size {
             buffer.remove(0);
         }
     }
 
     /// Maintain time-based window for timestamped data
-    fn maintain_time_window<T>(&self, buffer: &mut Vec<T>, window_duration: Duration) 
+    fn maintain_time_window<T>(buffer: &mut Vec<T>, window_duration: Duration) 
     where 
         T: HasTimestamp
     {
@@ -225,22 +225,31 @@ impl PerformanceMetrics {
     /// Clean up old data beyond limits (hybrid approach)
     pub fn cleanup_old_data(&mut self) {
         // Clean up performance metrics with size limits
-        self.maintain_circular_buffer(&mut self.container_startup_times, 100);
-        self.maintain_circular_buffer(&mut self.execution_times, 100);
+        Self::maintain_circular_buffer(&mut self.container_startup_times, 100);
+        Self::maintain_circular_buffer(&mut self.execution_times, 100);
         
         // Clean up API latencies
         for latencies in self.api_latencies.values_mut() {
-            self.maintain_circular_buffer(latencies, 100);
+            Self::maintain_circular_buffer(latencies, 100);
         }
         
         // Clean up resource metrics with time windows
         let resource_window = Duration::from_secs(3600); // 1 hour
-        self.maintain_time_window(&mut self.memory_usage, resource_window);
-        self.maintain_time_window(&mut self.cpu_usage, resource_window);
+        maintain_time_window(&mut self.memory_usage, resource_window);
+        maintain_time_window(&mut self.cpu_usage, resource_window);
         
         // Remove empty endpoint entries
         self.api_latencies.retain(|_, latencies| !latencies.is_empty());
     }
+}
+
+/// Maintain time-based window for timestamped data
+fn maintain_time_window<T>(buffer: &mut Vec<T>, window_duration: Duration) 
+where 
+    T: HasTimestamp
+{
+    let cutoff_time = Instant::now() - window_duration;
+    buffer.retain(|item| item.timestamp() > cutoff_time);
 }
 
 /// Trait for items that have a timestamp
@@ -402,7 +411,8 @@ impl Timer {
     }
 
     pub fn stop(self) -> (String, Duration, HashMap<String, String>) {
-        (self.name, self.elapsed(), self.labels)
+        let elapsed = self.elapsed();
+        (self.name, elapsed, self.labels)
     }
 }
 

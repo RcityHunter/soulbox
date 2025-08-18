@@ -9,7 +9,7 @@ use uuid::Uuid;
 use base64::Engine;
 
 use crate::container::{ResourceLimits as ContainerResourceLimits, NetworkConfig as ContainerNetworkConfig};
-use crate::container::resource_limits::{MemoryLimits, CpuLimits, DiskLimits};
+use crate::container::resource_limits::{MemoryLimits, CpuLimits, DiskLimits, NetworkLimits};
 use crate::sandbox::SandboxRuntime;
 
 // Import generated protobuf types
@@ -136,7 +136,6 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
                 upload_bps: Some(1024 * 1024 * 10), // 10 MB/s
                 download_bps: Some(1024 * 1024 * 100), // 100 MB/s
                 max_connections: Some(100),
-                allowed_ports: Vec::new(),
             },
         };
 

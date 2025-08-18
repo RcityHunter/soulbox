@@ -351,7 +351,7 @@ impl ContainerPool {
             // Security enhancements
             user: Some("1000:1000".to_string()), // Non-root user
             host_config: Some(bollard::models::HostConfig {
-                memory: Some(runtime_config.memory_limit),
+                memory: runtime_config.memory_limit.map(|m| m as i64),
                 nano_cpus: runtime_config.cpu_limit.map(|cpu| (cpu * 1_000_000_000.0) as i64),
                 security_opt: Some(vec!["no-new-privileges:true".to_string()]),
                 readonly_rootfs: Some(false), // Allow writes to /workspace
@@ -507,7 +507,7 @@ impl ContainerPool {
         
         match tokio::time::timeout(
             timeout,
-            self.container_manager.execute_command(container_id, command)
+            self.container_manager.execute_command(container_id, &[command])
         ).await {
             Ok(Ok(_)) => {
                 debug!("Container {} warmed up successfully", container_id);
@@ -525,8 +525,14 @@ impl ContainerPool {
     /// Check container health
     async fn check_container_health(&self, container_id: &str) -> Result<bool> {
         match self.container_manager.get_container_info(container_id).await {
-            Ok(Some(info)) => Ok(info.state == "running"),
-            Ok(None) => Ok(false),
+            Ok(info) => {
+                // Check if container state indicates it's running
+                Ok(info.state
+                    .as_ref()
+                    .and_then(|state| state.status.as_ref())
+                    .map(|status| matches!(status, bollard::models::ContainerStateStatusEnum::RUNNING))
+                    .unwrap_or(false))
+            },
             Err(_) => Ok(false),
         }
     }
@@ -679,7 +685,7 @@ impl ContainerPool {
             working_dir: Some("/workspace".to_string()),
             env: Some(vec![]), // Empty environment for now
             host_config: Some(bollard::models::HostConfig {
-                memory: Some(runtime_config.memory_limit),
+                memory: runtime_config.memory_limit.map(|m| m as i64),
                 nano_cpus: runtime_config.cpu_limit.map(|cpu| (cpu * 1_000_000_000.0) as i64),
                 ..Default::default()
             }),
@@ -692,7 +698,7 @@ impl ContainerPool {
 
         // Warm up container if configured
         if let Some(warmup_cmd) = &runtime_config.warmup_command {
-            if let Err(e) = Self::warmup_container_static(container_manager, &container_id, warmup_cmd).await {
+            if let Err(e) = Self::warmup_container_with_timeout(container_manager, &container_id, warmup_cmd, 30).await {
                 warn!("Failed to warm up container {}: {}", container_id, e);
             }
         }
@@ -702,7 +708,7 @@ impl ContainerPool {
     }
 
     /// Static version of warmup_container for use in maintenance
-    async fn warmup_container_static(
+    async fn warmup_container_with_timeout(
         container_manager: &Arc<ContainerManager>,
         container_id: &str,
         command: &str,
@@ -712,7 +718,7 @@ impl ContainerPool {
         
         match tokio::time::timeout(
             timeout,
-            container_manager.execute_command(container_id, command)
+            container_manager.execute_command(container_id, &[command])
         ).await {
             Ok(Ok(_)) => {
                 debug!("Container {} warmed up successfully", container_id);

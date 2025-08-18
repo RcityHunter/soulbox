@@ -15,6 +15,9 @@ pub enum SoulBoxError {
 
     #[error("Authorization error: {0}")]
     Authorization(String),
+    
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -161,7 +164,7 @@ pub enum SoulBoxError {
     #[error("Environment variable missing: {variable}")]
     EnvironmentVariableMissing { variable: String },
     
-    #[error("Configuration validation failed: {section} - {errors}")]
+    #[error("Configuration validation failed: {section} - {}", errors.join(", "))]
     ConfigurationValidationFailed { section: String, errors: Vec<String> },
 
     // Legacy broad error types (to be gradually replaced)
@@ -185,6 +188,40 @@ pub enum SoulBoxError {
 
     #[error("Redis error: {0}")]
     Redis(String),
+
+    // Additional error variants needed by the codebase
+    #[error("Validation error: {0}")]
+    Validation(String),
+
+    #[error("Timeout occurred: {0}")]
+    Timeout(String),
+
+    #[error("Resource limit reached: {0}")]
+    ResourceLimit(String),
+
+    #[error("Resource not found: {0}")]
+    NotFound(String),
+
+    #[error("Network error: {0}")]
+    Network(String),
+
+    #[error("Template error: {0}")]
+    Template(String),
+
+    #[error("Security error: {0}")]
+    Security(String),
+
+    #[error("Invalid state: {0}")]
+    InvalidState(String),
+
+    #[error("Audit error: {0}")]
+    Audit(String),
+
+    #[error("Database error: {0}")]
+    Database(String),
+
+    #[error("Prometheus error: {0}")]
+    Prometheus(String),
 }
 
 impl SoulBoxError {
@@ -327,5 +364,12 @@ impl SoulBoxError {
             SoulBoxError::Unsupported(_) => 501,
             _ => 500,
         }
+    }
+}
+
+// Additional From implementations for third-party library errors
+impl From<prometheus::Error> for SoulBoxError {
+    fn from(err: prometheus::Error) -> Self {
+        SoulBoxError::Prometheus(err.to_string())
     }
 }

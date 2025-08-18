@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, Query, State, OriginalUri},
     http::StatusCode,
     response::Json,
     routing::{delete, get, post, put},
@@ -9,7 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use base64::Engine;
-use std::sync::Arc;
+use std::{sync::Arc, collections::HashMap};
 use uuid::Uuid;
 
 use crate::auth::middleware::AuthExtractor;
@@ -167,11 +167,17 @@ pub async fn delete_file(
 
 /// List directory contents
 pub async fn list_directory(
-    State(_state): State<AppState>,
-    Path((sandbox_id, dir_path)): Path<(String, String)>,
+    axum::extract::Path(sandbox_id): axum::extract::Path<String>,
+    axum::extract::OriginalUri(original_uri): axum::extract::OriginalUri,
     Query(_params): Query<ListParams>,
     _auth: AuthExtractor,
+    State(_state): State<AppState>,
 ) -> Result<Json<DirectoryListing>, (StatusCode, Json<Value>)> {
+    // Extract dir_path from the original URI
+    let uri_path = original_uri.path();
+    let _dir_path = uri_path.split("/directories/").nth(1)
+        .unwrap_or("");
+    
     // Validate sandbox_id is a valid UUID
     let _sandbox_uuid = Uuid::parse_str(&sandbox_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid sandbox ID"}))))?;
@@ -209,10 +215,16 @@ pub async fn create_directory(
 
 /// Get file metadata
 pub async fn get_file_metadata(
-    State(_state): State<AppState>,
-    Path((sandbox_id, file_path)): Path<(String, String)>,
+    axum::extract::Path(sandbox_id): axum::extract::Path<String>,
+    axum::extract::OriginalUri(original_uri): axum::extract::OriginalUri,
     _auth: AuthExtractor,
+    State(_state): State<AppState>,
 ) -> Result<Json<FileMetadata>, (StatusCode, Json<Value>)> {
+    // Extract file_path from the original URI
+    let uri_path = original_uri.path();
+    let file_path = uri_path.split("/metadata/").nth(1)
+        .unwrap_or("");
+    
     // Validate sandbox_id is a valid UUID
     let _sandbox_uuid = Uuid::parse_str(&sandbox_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid sandbox ID"}))))?;
@@ -221,7 +233,7 @@ pub async fn get_file_metadata(
     // For now, return a mock response
     let mock_metadata = FileMetadata {
         name: "mock_file.txt".to_string(),
-        path: file_path,
+        path: file_path.to_string(),
         size: 0,
         is_directory: false,
         is_symlink: false,

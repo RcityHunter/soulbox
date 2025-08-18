@@ -91,16 +91,17 @@ pub struct MetricsCollector {
 impl MetricsCollector {
     /// Create a new metrics collector
     pub async fn new(config: &BillingConfig) -> Result<Self> {
-        let redis_client = Client::open(config.redis_url.as_str())
+        let redis_client = Client::open(config.storage_config.redis_url.as_str())
             .context("Failed to create Redis client")?;
 
         // Test connection and create consumer group if it doesn't exist
         let mut conn = redis_client.get_multiplexed_async_connection().await
             .context("Failed to connect to Redis")?;
         
+        let consumer_group = format!("{}_consumers", config.metrics_stream);
         let _: Result<String, redis::RedisError> = conn.xgroup_create_mkstream(
             &config.metrics_stream,
-            &config.consumer_group,
+            &consumer_group,
             0
         ).await;
 

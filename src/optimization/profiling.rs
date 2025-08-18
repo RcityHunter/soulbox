@@ -107,9 +107,10 @@ impl PerformanceProfiler {
 
     /// Create profiler with custom configuration
     pub fn with_config(config: ProfilingConfig) -> Self {
+        let max_samples = config.max_samples;
         Self {
             config,
-            samples: Arc::new(RwLock::new(VecDeque::with_capacity(config.max_samples))),
+            samples: Arc::new(RwLock::new(VecDeque::with_capacity(max_samples))),
             function_profiles: Arc::new(RwLock::new(HashMap::new())),
             component_profiles: Arc::new(RwLock::new(HashMap::new())),
             profiling_active: Arc::new(RwLock::new(false)),

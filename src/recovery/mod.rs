@@ -199,7 +199,7 @@ impl RecoveryManager {
             let mut recovery_strategies = self.recovery_strategies.write().await;
             recovery_strategies.insert(
                 component.to_string(),
-                strategies::RecoveryStrategyImpl::new(strategy, component),
+                strategies::RecoveryStrategyImpl::new(strategy.clone(), component),
             );
         }
 
@@ -320,7 +320,8 @@ impl RecoveryManager {
             
             // Keep only recent events
             if events.len() > 1000 {
-                events.drain(0..events.len() - 1000);
+                let drain_count = events.len() - 1000;
+                events.drain(0..drain_count);
             }
         }
 
@@ -558,7 +559,8 @@ impl RecoveryManager {
             
             // Keep only recent events
             if events.len() > 1000 {
-                events.drain(0..events.len() - 1000);
+                let drain_count = events.len() - 1000;
+                events.drain(0..drain_count);
             }
         }
     }

@@ -41,7 +41,7 @@ impl Default for FailoverConfig {
 }
 
 /// Failover target information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct FailoverTarget {
     pub id: String,
     pub name: String,
@@ -163,6 +163,8 @@ impl FailoverManager {
             targets.insert(target.id.clone(), target);
         }
 
+        let backup_count = targets.len() - 1;
+        
         // Create component state
         let state = ComponentFailoverState {
             component: component.to_string(),
@@ -193,7 +195,7 @@ impl FailoverManager {
         tracing::info!(
             component = component,
             primary_target = primary_target.name,
-            backup_count = targets.len() - 1,
+            backup_count = backup_count,
             "Registered component for failover management"
         );
 
@@ -545,7 +547,8 @@ impl FailoverManager {
         
         // Keep only recent events
         if events.len() > 1000 {
-            events.drain(0..events.len() - 1000);
+            let drain_count = events.len() - 1000;
+            events.drain(0..drain_count);
         }
     }
 

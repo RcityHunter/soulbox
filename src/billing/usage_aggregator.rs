@@ -175,7 +175,7 @@ pub struct UsageAggregator {
 impl UsageAggregator {
     /// Create a new usage aggregator
     pub async fn new(config: &BillingConfig) -> Result<Self> {
-        let redis_client = Client::open(config.redis_url.as_str())
+        let redis_client = Client::open(config.storage_config.redis_url.as_str())
             .context("Failed to create Redis client")?;
 
         // Test connection
@@ -439,7 +439,7 @@ impl UsageAggregator {
         let data = serde_json::to_string(summary)
             .context("Failed to serialize usage summary")?;
 
-        let _: () = conn.set_ex(&key, 86400 * 30, data).await // 30 days TTL
+        let _: () = conn.set_ex(&key, &data, 86400 * 30).await // 30 days TTL
             .context("Failed to store usage summary")?;
 
         // Also store in a sorted set for range queries

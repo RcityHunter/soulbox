@@ -202,13 +202,15 @@ impl SnapshotManager {
             checksum: self.calculate_checksum(&checkpoint_data),
         };
 
+        let size_bytes = metadata.size_bytes;
+        
         // Store snapshot
         self.storage.store_snapshot(metadata, checkpoint_data, config.compress).await
             .context("Failed to store snapshot")?;
 
         tracing::info!(
             snapshot_id = %snapshot_id,
-            size_bytes = metadata.size_bytes,
+            size_bytes = size_bytes,
             "Snapshot created successfully"
         );
 

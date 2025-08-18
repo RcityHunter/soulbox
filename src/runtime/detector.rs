@@ -270,7 +270,7 @@ impl RuntimeDetector {
     /// Detect runtime from content patterns
     fn detect_from_patterns(&self, content: &str) -> Option<DetectionResult> {
         let mut scores: HashMap<RuntimeType, f32> = HashMap::new();
-        let mut best_match = None;
+        let mut best_match: Option<(RuntimeType, f32)> = None;
 
         for pattern in &self.content_patterns {
             if pattern.pattern.is_match(content) {

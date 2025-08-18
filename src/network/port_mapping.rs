@@ -85,6 +85,7 @@ pub struct PortMappingConfig {
 }
 
 /// Port mapping manager
+#[derive(Debug)]
 pub struct PortMappingManager {
     /// Configuration
     config: PortMappingConfig,

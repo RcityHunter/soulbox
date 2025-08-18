@@ -374,6 +374,9 @@ impl VariableInspector {
             }
         }
         
+        // Clone old value for logging
+        let old_value = old_var.value.clone();
+        
         // Record modification
         let modification = VariableModification {
             session_id: session_id.to_string(),
@@ -396,7 +399,7 @@ impl VariableInspector {
         }
         
         info!("Modified variable '{}' in session {} from '{}' to '{}'", 
-              variable_name, session_id, old_var.value, new_value);
+              variable_name, session_id, old_value, new_value);
         Ok(())
     }
     

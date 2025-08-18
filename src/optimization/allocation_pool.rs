@@ -501,10 +501,11 @@ mod tests {
     #[test]
     fn test_pooled_item_take() {
         let pool = AllocationPool::new(10).unwrap();
-        let mut item = pool.allocate("test_pool", || String::from("hello"));
+        let item = pool.allocate("test_pool", || String::from("hello"));
         
+        // Take consumes the item, so we can't access it afterwards
         let taken = item.take();
         assert_eq!(taken, Some(String::from("hello")));
-        assert!(item.data.is_none());
+        // Cannot access item.data after take() consumes the item
     }
 }
