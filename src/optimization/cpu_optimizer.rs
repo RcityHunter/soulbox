@@ -8,7 +8,7 @@ use parking_lot::RwLock;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use sysinfo::{CpuExt, System, SystemExt};
+use sysinfo::System;
 use tokio::sync::mpsc;
 use tokio::time::interval;
 

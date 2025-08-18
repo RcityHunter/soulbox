@@ -321,21 +321,27 @@ impl SurrealPool {
     /// 单个连接健康检查
     async fn health_check_connection(db: &Surreal<Any>) -> SurrealResult<()> {
         // 1. Basic connectivity test
-        let result = db.query("SELECT 1 as health_check")
+        let mut result = db.query("SELECT 1 as health_check")
             .await
             .map_err(|e| SurrealConnectionError::HealthCheck(format!("基础连接检查失败: {}", e)))?;
         
-        if result.is_empty() {
-            return Err(SurrealConnectionError::HealthCheck("查询未返回结果".to_string()));
+        // Try to take the first result to check if query was successful
+        let check_result: Result<Option<serde_json::Value>, _> = result.take(0);
+        match check_result {
+            Ok(Some(_)) => {}, // Query successful
+            Ok(None) | Err(_) => return Err(SurrealConnectionError::HealthCheck("查询未返回结果".to_string())),
         }
         
         // 2. Check namespace and database access
-        let result = db.query("INFO FOR DB")
+        let mut result = db.query("INFO FOR DB")
             .await
             .map_err(|e| SurrealConnectionError::HealthCheck(format!("数据库信息查询失败: {}", e)))?;
         
-        if result.is_empty() {
-            return Err(SurrealConnectionError::HealthCheck("无法获取数据库信息".to_string()));
+        // Try to take the first result to check if query was successful
+        let check_result: Result<Option<serde_json::Value>, _> = result.take(0);
+        match check_result {
+            Ok(Some(_)) => {}, // Query successful
+            Ok(None) | Err(_) => return Err(SurrealConnectionError::HealthCheck("无法获取数据库信息".to_string())),
         }
         
         // 3. Check write permissions by creating a temporary record
@@ -348,13 +354,16 @@ impl SurrealPool {
             .map_err(|e| SurrealConnectionError::HealthCheck(format!("写入权限检查失败: {}", e)))?;
         
         // Read test record
-        let result = db.query("SELECT * FROM $record_id")
+        let mut result = db.query("SELECT * FROM $record_id")
             .bind(("record_id", &test_record_id))
             .await
             .map_err(|e| SurrealConnectionError::HealthCheck(format!("读取权限检查失败: {}", e)))?;
         
-        if result.is_empty() {
-            return Err(SurrealConnectionError::HealthCheck("无法读取测试记录".to_string()));
+        // Try to take the first result to check if query was successful
+        let check_result: Result<Option<serde_json::Value>, _> = result.take(0);
+        match check_result {
+            Ok(Some(_)) => {}, // Query successful
+            Ok(None) | Err(_) => return Err(SurrealConnectionError::HealthCheck("无法读取测试记录".to_string())),
         }
         
         // Delete test record

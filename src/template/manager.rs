@@ -63,4 +63,42 @@ impl TemplateManager {
         info!("Template initialization temporarily disabled during database migration");
         Ok(())
     }
+
+    /// List public templates (stub implementation)
+    pub async fn list_public_templates(
+        &self,
+        _runtime_type: Option<&str>,
+        _page: usize,
+        _page_size: usize,
+    ) -> SoulBoxResult<Vec<Template>> {
+        info!("Template public listing temporarily disabled during database migration");
+        Ok(Vec::new())
+    }
+
+    /// Get template by slug (stub implementation)
+    pub async fn get_template_by_slug(&self, _slug: &str) -> SoulBoxResult<Option<Template>> {
+        info!("Template slug lookup temporarily disabled during database migration");
+        Ok(None)
+    }
+
+    /// List user templates (stub implementation)
+    pub async fn list_user_templates(
+        &self,
+        _user_id: uuid::Uuid,
+        _page: usize,
+        _page_size: usize,
+    ) -> SoulBoxResult<Vec<Template>> {
+        info!("Template user listing temporarily disabled during database migration");
+        Ok(Vec::new())
+    }
+
+    /// Clone template (stub implementation)
+    pub async fn clone_template(
+        &self,
+        _template_id: uuid::Uuid,
+        _user_id: uuid::Uuid,
+    ) -> SoulBoxResult<Template> {
+        info!("Template cloning temporarily disabled during database migration");
+        Err(crate::error::SoulBoxError::NotImplemented("Template cloning not yet implemented".into()))
+    }
 }

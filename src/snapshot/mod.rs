@@ -16,7 +16,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::container::manager::ContainerManager;
-use crate::filesystem::manager::FilesystemManager;
+use crate::filesystem::manager::FileSystemManager;
 
 /// Represents different types of snapshots that can be created
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -91,7 +91,7 @@ pub struct SnapshotManager {
     checkpoint_manager: checkpoint::CheckpointManager,
     active_operations: RwLock<HashMap<Uuid, SnapshotStatus>>,
     container_manager: ContainerManager,
-    filesystem_manager: FilesystemManager,
+    filesystem_manager: FileSystemManager,
 }
 
 impl SnapshotManager {
@@ -99,7 +99,7 @@ impl SnapshotManager {
     pub fn new(
         storage_path: PathBuf,
         container_manager: ContainerManager,
-        filesystem_manager: FilesystemManager,
+        filesystem_manager: FileSystemManager,
     ) -> Result<Self> {
         let storage = storage::SnapshotStorage::new(storage_path)
             .context("Failed to initialize snapshot storage")?;

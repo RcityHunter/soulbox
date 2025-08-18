@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use crate::error::{Result, SoulBoxError};
-use bollard::container::Config as ContainerConfig;
+use bollard::container::Config;
 use super::{RuntimeConfig, RuntimeType, ExecutionContext, ExecutionFile};
 
 /// Node.js-specific runtime configuration
@@ -250,10 +250,10 @@ impl NodeJSRuntime {
     }
 
     /// Create container configuration for Node.js execution
-    pub fn create_container_config(&self, context: &ExecutionContext) -> Result<ContainerConfig> {
+    pub fn create_container_config(&self, context: &ExecutionContext) -> Result<Config<String>> {
         let runtime_config = self.create_runtime_config();
         
-        let mut config = ContainerConfig {
+        let mut config = Config {
             image: runtime_config.docker_image,
             working_dir: Some(context.working_dir.clone()),
             environment: context.environment.clone(),

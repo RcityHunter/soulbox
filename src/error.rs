@@ -53,6 +53,18 @@ pub enum SoulBoxError {
     #[error("Container pool exhausted for runtime: {runtime}")]
     ContainerPoolExhausted { runtime: String, max_containers: u32 },
     
+    #[error("Pool error: {0}")]
+    PoolError(String),
+    
+    #[error("Monitoring error: {0}")]
+    MonitoringError(String),
+    
+    #[error("Runtime error: {0}")]
+    RuntimeError(String),
+    
+    #[error("Session error: {0}")]
+    SessionError(String),
+    
     // Generic container error fallback
     #[error("Container error: {0}")]
     Container(#[from] bollard::errors::Error),
@@ -167,6 +179,12 @@ pub enum SoulBoxError {
 
     #[error("Provider error: {0}")]
     Provider(String),
+
+    #[error("Filesystem error: {0}")]
+    Filesystem(String),
+
+    #[error("Redis error: {0}")]
+    Redis(String),
 }
 
 impl SoulBoxError {

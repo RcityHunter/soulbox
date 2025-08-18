@@ -103,13 +103,14 @@ impl<'a> SurrealOperations<'a> {
         
         let sql = format!("DELETE {}:{}", table, id);
         
-        let response = self.conn.db()
+        let mut response = self.conn.db()
             .query(sql)
             .await
             .map_err(|e| SurrealConnectionError::Query(format!("删除记录失败: {}", e)))?;
         
         // 检查是否有记录被删除
-        Ok(!response.is_empty())
+        let result: Result<Option<serde_json::Value>, _> = response.take(0);
+        Ok(result.is_ok() && result.unwrap().is_some())
     }
     
     /// Execute custom SurrealQL query

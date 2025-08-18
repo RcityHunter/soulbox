@@ -30,6 +30,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Date/Time
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.9"
 
 # Environment
 dotenvy = "0.15"
@@ -88,8 +89,8 @@ base64 = "0.21"
 # Database
 surrealdb = { version = "1.5", features = ["kv-rocksdb"] }
 
-# Redis for session persistence
-redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+# Redis for session persistence and billing streams
+redis = { version = "0.25", features = ["tokio-comp", "connection-manager", "streams"] }
 
 # Parking lot for better synchronization primitives
 parking_lot = "0.12"
@@ -110,6 +111,9 @@ flate2 = "1.0"
 # URL parsing for proxy
 url = "2.4"
 urlencoding = "2.1"
+
+# Billing system dependencies
+rust_decimal = { version = "1.35", features = ["serde-float", "tokio-pg"] }
 
 [build-dependencies]
 tonic-build = "0.10"

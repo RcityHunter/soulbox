@@ -230,6 +230,9 @@ pub async fn get_file_metadata(
             readable: true,
             writable: true,
             executable: false,
+            owner_id: 1000,  // Default user ID
+            group_id: 1000,  // Default group ID
+            mode: 0o644,     // Default file mode (readable/writable by owner, readable by others)
         },
         created_at: std::time::UNIX_EPOCH,
         modified_at: std::time::UNIX_EPOCH,

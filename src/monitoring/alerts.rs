@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, RwLock};
 use super::{PerformanceMetrics, HealthStatus};
 
 /// Alert severity levels
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AlertSeverity {
     Info,
     Warning,

@@ -356,7 +356,10 @@ impl AllocationPool {
 }
 
 /// RAII wrapper for pooled objects
-pub struct PooledItem<T> {
+pub struct PooledItem<T>
+where
+    T: Send + Sync + 'static,
+{
     data: Option<T>,
     pool: Arc<Mutex<ObjectPool>>,
     pool_name: String,
@@ -394,7 +397,10 @@ where
     }
 }
 
-impl<T> std::ops::Deref for PooledItem<T> {
+impl<T> std::ops::Deref for PooledItem<T>
+where
+    T: Send + Sync + 'static,
+{
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -402,7 +408,10 @@ impl<T> std::ops::Deref for PooledItem<T> {
     }
 }
 
-impl<T> std::ops::DerefMut for PooledItem<T> {
+impl<T> std::ops::DerefMut for PooledItem<T>
+where
+    T: Send + Sync + 'static,
+{
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.data.as_mut().expect("PooledItem data is None")
     }

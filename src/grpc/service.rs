@@ -132,6 +132,12 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
                 limit_mb: 2048,
                 iops_limit: Some(1000),
             },
+            network: NetworkLimits {
+                upload_bps: Some(1024 * 1024 * 10), // 10 MB/s
+                download_bps: Some(1024 * 1024 * 100), // 100 MB/s
+                max_connections: Some(100),
+                allowed_ports: Vec::new(),
+            },
         };
 
         let network_config = ContainerNetworkConfig {

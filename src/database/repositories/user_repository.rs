@@ -180,11 +180,14 @@ impl UserRepository {
             query = query.bind(("tenant_id", tenant_record_id));
         }
         
-        let response = query.await
+        let mut response = query.await
             .map_err(|e| DatabaseError::Query(format!("更新用户失败: {}", e)))?;
         
-        if response.is_empty() {
-            return Err(DatabaseError::NotFound);
+        // Try to take the first result to check if update was successful
+        let result: Result<Option<serde_json::Value>, _> = response.take(0);
+        match result {
+            Ok(Some(_)) => {}, // Update successful
+            Ok(None) | Err(_) => return Err(DatabaseError::NotFound),
         }
         
         info!("Updated user: {}", user.username);
@@ -203,15 +206,18 @@ impl UserRepository {
         // Use direct SurrealQL with parameter binding to prevent SQL injection
         let sql = "UPDATE $record_id SET password_hash = $password_hash, updated_at = time::now()";
         
-        let response = conn.db()
+        let mut response = conn.db()
             .query(sql)
             .bind(("record_id", &record_id))
             .bind(("password_hash", password_hash))
             .await
             .map_err(|e| DatabaseError::Query(format!("更新密码失败: {}", e)))?;
         
-        if response.is_empty() {
-            return Err(DatabaseError::NotFound);
+        // Try to take the first result to check if update was successful
+        let result: Result<Option<serde_json::Value>, _> = response.take(0);
+        match result {
+            Ok(Some(_)) => {}, // Update successful
+            Ok(None) | Err(_) => return Err(DatabaseError::NotFound),
         }
         
         Ok(())
@@ -250,14 +256,17 @@ impl UserRepository {
         // Use direct SurrealQL with proper record ID format
         let sql = "DELETE $record_id";
         
-        let response = conn.db()
+        let mut response = conn.db()
             .query(sql)
             .bind(("record_id", &record_id))
             .await
             .map_err(|e| DatabaseError::Query(format!("删除用户失败: {}", e)))?;
         
-        if response.is_empty() {
-            return Err(DatabaseError::NotFound);
+        // Try to take the first result to check if delete was successful
+        let result: Result<Option<serde_json::Value>, _> = response.take(0);
+        match result {
+            Ok(Some(_)) => {}, // Delete successful
+            Ok(None) | Err(_) => return Err(DatabaseError::NotFound),
         }
         
         info!("Deleted user: {}", user_id);

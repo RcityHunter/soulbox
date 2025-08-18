@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use bollard::Docker;
-use bollard::container::{Config as ContainerConfig, CreateContainerOptions};
+use bollard::container::{Config as ContainerConfig, CreateContainerOptions, StartContainerOptions};
 use bollard::models::HostConfig;
 use tracing::{info, error};
 
@@ -172,7 +172,7 @@ impl ContainerManager {
             pids_limit: Some(256), // Limit number of processes
             
             // File system constraints
-            readonly_root_fs: Some(false), // Allow writes to root filesystem
+            readonly_rootfs: Some(false), // Allow writes to root filesystem
             tmpfs: Some({
                 let mut tmpfs = std::collections::HashMap::new();
                 tmpfs.insert("/tmp".to_string(), format!("size={}m,exec,suid,dev", resource_limits.disk.limit_mb / 4));
@@ -239,6 +239,9 @@ impl ContainerManager {
         let container_id = create_result.id;
         info!("Created Docker container: {} for sandbox: {}", container_id, sandbox_id);
         
+        // Clone resource_limits before moving it to avoid borrow after move
+        let network_limits = resource_limits.network.clone();
+        
         // Create SandboxContainer instance with real Docker integration
         let container = Arc::new(SandboxContainer::new(
             sandbox_id,
@@ -257,8 +260,8 @@ impl ContainerManager {
         info!("Container {} created and registered for sandbox {}", container_id, sandbox_id);
         
         // Apply network bandwidth limits if specified (requires additional setup)
-        if resource_limits.network.upload_bps.is_some() || resource_limits.network.download_bps.is_some() {
-            match self.setup_network_bandwidth_limits(&container_id, &resource_limits.network).await {
+        if network_limits.upload_bps.is_some() || network_limits.download_bps.is_some() {
+            match self.setup_network_bandwidth_limits(&container_id, &network_limits).await {
                 Ok(_) => info!("Network bandwidth limits applied to container {}", container_id),
                 Err(e) => error!("Failed to apply network limits to container {}: {}", container_id, e),
             }
@@ -379,13 +382,78 @@ impl ContainerManager {
     /// List all active networks managed by this container manager
     pub async fn list_active_networks(&self) -> Vec<String> {
         let net_mgr = self.network_manager.lock().await;
-        net_mgr.list_active_networks()
+        net_mgr.list_active_networks().into_iter().map(|s| s.to_string()).collect()
     }
     
     /// Get port mappings for a sandbox
     pub async fn get_port_mappings(&self, sandbox_id: &str) -> Vec<crate::network::port_mapping::PortAllocation> {
         let net_mgr = self.network_manager.lock().await;
-        net_mgr.port_manager.get_sandbox_ports(sandbox_id)
+        net_mgr.port_service().get_sandbox_ports(sandbox_id)
+    }
+
+    /// Create a container with basic configuration (for pool usage)
+    pub async fn create_container(&self, config: bollard::container::Config<String>) -> Result<String> {
+        let container_name = format!("soulbox-pool-{}", uuid::Uuid::new_v4());
+        
+        let create_result = self.docker
+            .create_container(
+                Some(bollard::container::CreateContainerOptions {
+                    name: container_name.clone(),
+                    platform: None,
+                }),
+                config,
+            )
+            .await?;
+
+        Ok(create_result.id)
+    }
+
+    /// Start a container by ID
+    pub async fn start_container(&self, container_id: &str) -> Result<()> {
+        self.docker
+            .start_container(container_id, None::<bollard::container::StartContainerOptions<String>>)
+            .await?;
+        Ok(())
+    }
+
+    /// Stop a container by ID
+    pub async fn stop_container(&self, container_id: &str) -> Result<()> {
+        self.docker
+            .stop_container(container_id, None::<bollard::container::StopContainerOptions>)
+            .await?;
+        Ok(())
+    }
+
+    /// Execute a command in a container
+    pub async fn execute_command(&self, container_id: &str, command: &[&str]) -> Result<String> {
+        use bollard::exec::{CreateExecOptions, StartExecResults};
+        use futures_util::StreamExt;
+
+        let exec_config = CreateExecOptions {
+            attach_stdout: Some(true),
+            attach_stderr: Some(true),
+            cmd: Some(command.iter().map(|s| s.to_string()).collect()),
+            ..Default::default()
+        };
+
+        let exec = self.docker.create_exec(container_id, exec_config).await?;
+        
+        if let StartExecResults::Attached { mut output, .. } = 
+            self.docker.start_exec(&exec.id, None).await? {
+            
+            let mut result = String::new();
+            while let Some(Ok(msg)) = output.next().await {
+                result.push_str(&String::from_utf8_lossy(&msg.into_bytes()));
+            }
+            Ok(result)
+        } else {
+            Err(crate::error::SoulBoxError::Internal("Failed to attach to exec".to_string()))
+        }
+    }
+
+    /// Get container information
+    pub async fn get_container_info(&self, container_id: &str) -> Result<bollard::models::ContainerInspectResponse> {
+        Ok(self.docker.inspect_container(container_id, None).await?)
     }
 }
 

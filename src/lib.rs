@@ -22,6 +22,7 @@ pub mod debug;
 pub mod snapshot;
 pub mod optimization;
 pub mod recovery;
+pub mod billing;
 
 // Simple implementation - Linus style
 pub mod simple;
@@ -42,7 +43,8 @@ pub use dependencies::{DependencyManager, PackageManager, PackageSpec, Dependenc
 pub use debug::{DebugManager, DebugConfig, DebugLanguage, DebugSession, BreakpointManager, inspector::VariableInspector};
 pub use snapshot::{SnapshotManager, SnapshotConfig, SnapshotType, SnapshotMetadata, SnapshotStatus};
 pub use optimization::{OptimizationManager, OptimizationConfig, PerformanceHotspot, OptimizationPriority};
-pub use recovery::{RecoveryManager, RecoveryConfig, RecoveryStrategy, RecoveryResult, ComponentHealth, HealthStatus};
+pub use recovery::{RecoveryManager, RecoveryConfig, RecoveryStrategy, RecoveryResult, ComponentHealth, HealthStatus as RecoveryHealthStatus};
+pub use billing::{BillingService, BillingConfig, MetricsCollector, UsageAggregator, CostCalculator, BillingStorage};
 
 // Include generated protobuf code
 pub mod proto {

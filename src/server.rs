@@ -56,6 +56,8 @@ impl Server {
                 password: None,
                 pool: Default::default(),
                 retry: Default::default(),
+                reset_on_startup: false,
+                run_initialization: true,
             };
             
             match SurrealPool::new(surreal_config).await {
@@ -75,18 +77,20 @@ impl Server {
 
         // 创建认证管理器并强制使用安全的JWT配置
         let jwt_secret = std::env::var("JWT_SECRET")
-            .map_err(|_| SoulBoxError::Configuration(
-                "JWT_SECRET environment variable is required for production use. \
+            .map_err(|_| SoulBoxError::Configuration {
+                parameter: "JWT_SECRET".to_string(),
+                reason: "environment variable is required for production use. \
                 Please set a strong, randomly generated secret of at least 32 characters.".to_string()
-            ))?;
+            })?;
         
         let jwt_manager = Arc::new(JwtManager::new(
             &jwt_secret,
             "soulbox".to_string(),
             "soulbox-api".to_string(),
-        ).map_err(|e| SoulBoxError::Configuration(
-            format!("Failed to initialize JWT manager with secure configuration: {}", e)
-        ))?);
+        ).map_err(|e| SoulBoxError::Configuration {
+            parameter: "JWT_MANAGER".to_string(),
+            reason: format!("Failed to initialize JWT manager with secure configuration: {}", e)
+        })?);
         
         let api_key_manager = Arc::new(ApiKeyManager::new("sk".to_string()));
         

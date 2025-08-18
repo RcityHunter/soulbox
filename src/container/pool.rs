@@ -182,6 +182,7 @@ pub struct RuntimeStats {
     pub total_requests: u64,
     pub pool_hits: u64,
     pub avg_wait_time: Duration,
+    pub hit_rate: f64,
 }
 
 impl ContainerPool {
@@ -275,7 +276,7 @@ impl ContainerPool {
         // Return to pool
         let mut pools = self.pools.write().await;
         if let Some(pool) = pools.get_mut(&runtime) {
-            let mut container = PoolContainer::new(container_id.clone(), runtime);
+            let mut container = PoolContainer::new(container_id.clone(), runtime.clone());
             container.mark_available();
             container.warmed_up = true;
             container.healthy = true;
@@ -350,10 +351,10 @@ impl ContainerPool {
             // Security enhancements
             user: Some("1000:1000".to_string()), // Non-root user
             host_config: Some(bollard::models::HostConfig {
-                memory: Some(runtime_config.memory_limit as i64),
-                nano_cpus: Some((runtime_config.cpu_limit * 1_000_000_000.0) as i64),
+                memory: Some(runtime_config.memory_limit),
+                nano_cpus: runtime_config.cpu_limit.map(|cpu| (cpu * 1_000_000_000.0) as i64),
                 security_opt: Some(vec!["no-new-privileges:true".to_string()]),
-                read_only_root_fs: Some(false), // Allow writes to /workspace
+                readonly_rootfs: Some(false), // Allow writes to /workspace
                 // Network isolation
                 network_mode: Some("none".to_string()),
                 // Disable privileged mode
@@ -389,7 +390,7 @@ impl ContainerPool {
                         let cleanup_manager = self.container_manager.clone();
                         let cleanup_id = container_id.clone();
                         tokio::spawn(async move {
-                            if let Err(cleanup_err) = cleanup_manager.remove_container(&cleanup_id, true).await {
+                            if let Err(cleanup_err) = cleanup_manager.remove_container(&cleanup_id).await {
                                 error!("Failed to cleanup container {} after start failure: {}", cleanup_id, cleanup_err);
                             }
                         });
@@ -403,7 +404,7 @@ impl ContainerPool {
                     let cleanup_manager = self.container_manager.clone();
                     let cleanup_id = container_id.clone();
                     tokio::spawn(async move {
-                        if let Err(cleanup_err) = cleanup_manager.remove_container(&cleanup_id, true).await {
+                        if let Err(cleanup_err) = cleanup_manager.remove_container(&cleanup_id).await {
                             error!("Failed to cleanup container {} after timeout: {}", cleanup_id, cleanup_err);
                         }
                     });
@@ -506,7 +507,7 @@ impl ContainerPool {
         
         match tokio::time::timeout(
             timeout,
-            self.container_manager.execute_command(container_id, command, None)
+            self.container_manager.execute_command(container_id, command)
         ).await {
             Ok(Ok(_)) => {
                 debug!("Container {} warmed up successfully", container_id);
@@ -674,11 +675,14 @@ impl ContainerPool {
 
         // Create container configuration
         let container_config = bollard::container::Config {
-            image: runtime_config.base_image.clone(),
-            memory_limit: runtime_config.memory_limit,
-            cpu_limit: runtime_config.cpu_limit,
+            image: Some(runtime_config.base_image.clone()),
             working_dir: Some("/workspace".to_string()),
-            environment: HashMap::new(),
+            env: Some(vec![]), // Empty environment for now
+            host_config: Some(bollard::models::HostConfig {
+                memory: Some(runtime_config.memory_limit),
+                nano_cpus: runtime_config.cpu_limit.map(|cpu| (cpu * 1_000_000_000.0) as i64),
+                ..Default::default()
+            }),
             ..Default::default()
         };
 
@@ -688,13 +692,13 @@ impl ContainerPool {
 
         // Warm up container if configured
         if let Some(warmup_cmd) = &runtime_config.warmup_command {
-            if let Err(e) = Self::warmup_container_static(container_manager, &container_id, warmup_cmd, config.warmup_timeout).await {
+            if let Err(e) = Self::warmup_container_static(container_manager, &container_id, warmup_cmd).await {
                 warn!("Failed to warm up container {}: {}", container_id, e);
             }
         }
 
         info!("Created container {} for runtime {:?} during maintenance", container_id, runtime);
-        Ok(container_id)
+        Ok(container_id.to_string())
     }
 
     /// Static version of warmup_container for use in maintenance
@@ -708,7 +712,7 @@ impl ContainerPool {
         
         match tokio::time::timeout(
             timeout,
-            container_manager.execute_command(container_id, command, None)
+            container_manager.execute_command(container_id, command)
         ).await {
             Ok(Ok(_)) => {
                 debug!("Container {} warmed up successfully", container_id);

@@ -193,8 +193,9 @@ impl PortMappingManager {
                 sandbox_id: sandbox_id.to_string(),
                 container_port,
                 host_port,
-                protocol: PortProtocol::Tcp, // Default to TCP
+                protocol: "tcp".to_string(), // Default to TCP
                 allocated_at: chrono::Utc::now(),
+                is_active: true,
             };
             
             allocated.insert(host_port, allocation.clone());

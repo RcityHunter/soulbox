@@ -590,6 +590,7 @@ impl BreakpointManager {
         match expr.to_lowercase().as_str() {
             "true" => return Ok(true),
             "false" => return Ok(false),
+            _ => {} // Continue to other evaluation methods
         }
         
         // Handle variable existence checks
