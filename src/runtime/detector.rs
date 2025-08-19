@@ -335,7 +335,7 @@ impl RuntimeDetector {
         let competing_scores: Vec<f32> = all_scores
             .iter()
             .filter(|(runtime, _)| *runtime != target_runtime)
-            .map(|(_, score)| **score)
+            .map(|(_, score)| *score)
             .collect();
         
         if !competing_scores.is_empty() {

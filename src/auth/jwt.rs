@@ -75,14 +75,8 @@ impl JwtManager {
         validation.validate_exp = true; // 强制验证过期时间
         validation.validate_nbf = true; // 强制验证生效时间
         validation.validate_aud = true; // 始终启用严格的受众验证
-        validation.validate_iat = true; // 验证签发时间
-        
         // 使用单一安全算法
         validation.algorithms = vec![JwtConfig::ALGORITHM];
-        
-        // 禁用危险的验证绕过选项
-        validation.insecure_disable_signature_validation = false;
-        validation.validate_signature = true;
         
         Ok(Self {
             encoding_key,

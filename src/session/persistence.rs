@@ -1,4 +1,4 @@
-use redis::{AsyncCommands, Client};
+use redis::{AsyncCommands, Client, RedisError};
 use redis::aio::ConnectionManager;
 use serde_json;
 use std::collections::HashMap;
@@ -197,12 +197,12 @@ impl SessionManager for RedisSessionManager {
         if let Ok(Some(session)) = self.get_session(session_id).await {
             // Remove from user sessions set
             let user_sessions_key = self.user_sessions_key(&session.user_id);
-            let _: Result<i64, _> = conn.srem(&user_sessions_key, session_id.to_string()).await;
+            let _: Result<i64, RedisError> = conn.srem(&user_sessions_key, session_id.to_string()).await;
             
             // Remove container mapping if exists
             if let Some(container_id) = &session.container_id {
                 let container_key = self.container_session_key(container_id);
-                let _: Result<i64, _> = conn.del(&container_key).await;
+                let _ = conn.del(&container_key).await;
             }
         }
         

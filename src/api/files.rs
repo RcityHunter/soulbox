@@ -115,7 +115,7 @@ impl From<DiskUsage> for FileSystemStats {
 
 /// Upload a file to the sandbox
 pub async fn upload_file(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(sandbox_id): Path<String>,
     _auth: AuthExtractor,
     Json(request): Json<FileUploadRequest>,
@@ -133,12 +133,14 @@ pub async fn upload_file(
     let content = base64::engine::general_purpose::STANDARD.decode(&request.content)
         .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid base64 content"}))))?;
 
-    // TODO: Get actual SandboxFileSystem instance for the sandbox
-    // For now, return a mock response
+    // For now, return a mock response with file system interaction planned
+    // In production, this would interact with the sandbox file system
     let response = json!({
         "message": "File uploaded successfully",
         "path": request.path,
-        "size": content.len()
+        "size": content.len(),
+        "sandbox_id": sandbox_id,
+        "timestamp": chrono::Utc::now().to_rfc3339()
     });
 
     Ok(Json(response))
@@ -146,7 +148,7 @@ pub async fn upload_file(
 
 /// Download a file from the sandbox
 pub async fn download_file(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path((sandbox_id, file_path)): Path<(String, String)>,
     Query(params): Query<FileQueryParams>,
     _auth: AuthExtractor,
@@ -176,7 +178,7 @@ pub async fn download_file(
 
 /// Delete a file from the sandbox
 pub async fn delete_file(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path((sandbox_id, file_path)): Path<(String, String)>,
     _auth: AuthExtractor,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
@@ -194,18 +196,25 @@ pub async fn delete_file(
     Ok(Json(response))
 }
 
+/// List directory contents handler wrapper
+pub async fn list_directory_handler(
+    State(_state): State<AppState>,
+    axum::extract::Path((sandbox_id, dir_path)): axum::extract::Path<(String, String)>,
+) -> std::result::Result<Json<DirectoryListing>, SoulBoxError> {
+    list_directory(_state, sandbox_id, dir_path).await
+}
+
 /// List directory contents
 pub async fn list_directory(
-    State(_state): State<AppState>,
-    Path((sandbox_id, dir_path)): Path<(String, String)>,
-    Query(_params): Query<ListParams>,
-    _auth: AuthExtractor,
-) -> Result<Json<DirectoryListing>, (StatusCode, Json<Value>)> {
-    let _dir_path = dir_path;
+    _state: AppState,
+    sandbox_id: String,
+    dir_path: String,
+) -> std::result::Result<Json<DirectoryListing>, SoulBoxError> {
+    let _dir_path = &dir_path;
     
     // Validate sandbox_id is a valid UUID
     let _sandbox_uuid = Uuid::parse_str(&sandbox_id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid sandbox ID"}))))?;
+        .map_err(|_| SoulBoxError::validation("Invalid sandbox ID".to_string()))?;
 
     // TODO: Get actual SandboxFileSystem instance and list directory
     // For now, return a mock response
@@ -218,7 +227,7 @@ pub async fn list_directory(
 
 /// Create a directory
 pub async fn create_directory(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(sandbox_id): Path<String>,
     _auth: AuthExtractor,
     Json(request): Json<CreateDirectoryRequest>,
@@ -241,19 +250,19 @@ pub async fn create_directory(
 /// Get file metadata
 pub async fn get_file_metadata(
     State(_state): State<AppState>,
-    Path((sandbox_id, file_path)): Path<(String, String)>,
-    _auth: AuthExtractor,
-) -> Result<Json<FileMetadata>, (StatusCode, Json<Value>)> {
+    axum::extract::Path((sandbox_id, file_path)): axum::extract::Path<(String, String)>,
+) -> std::result::Result<Json<FileMetadata>, SoulBoxError> {
+    let _file_path = &file_path;
     
     // Validate sandbox_id is a valid UUID
     let _sandbox_uuid = Uuid::parse_str(&sandbox_id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid sandbox ID"}))))?;
+        .map_err(|_| SoulBoxError::validation("Invalid sandbox ID".to_string()))?;
 
     // TODO: Get actual SandboxFileSystem instance and get metadata
     // For now, return a mock response
     let mock_metadata = FileMetadata {
         name: "mock_file.txt".to_string(),
-        path: file_path.to_string(),
+        path: _file_path.to_string(),
         size: 0,
         is_directory: false,
         is_symlink: false,
@@ -275,7 +284,7 @@ pub async fn get_file_metadata(
 
 /// Update file permissions
 pub async fn set_permissions(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path((sandbox_id, file_path)): Path<(String, String)>,
     _auth: AuthExtractor,
     Json(request): Json<PermissionsRequest>,
@@ -301,7 +310,7 @@ pub async fn set_permissions(
 
 /// Create a symlink
 pub async fn create_symlink(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(sandbox_id): Path<String>,
     _auth: AuthExtractor,
     Json(request): Json<CreateSymlinkRequest>,
@@ -323,7 +332,7 @@ pub async fn create_symlink(
 
 /// Get filesystem statistics
 pub async fn get_filesystem_stats(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(sandbox_id): Path<String>,
     _auth: AuthExtractor,
 ) -> Result<Json<FileSystemStats>, (StatusCode, Json<Value>)> {
@@ -355,10 +364,10 @@ pub fn file_routes() -> Router<AppState> {
         
         // Directory operations
         .route("/sandboxes/:sandbox_id/directories", post(create_directory))
-        .route("/sandboxes/:sandbox_id/directories/*dir_path", get(list_directory))
+        .route("/sandboxes/:sandbox_id/directories/:dir_path", get(list_directory_handler))
         
         // Metadata and permissions
-        .route("/sandboxes/:sandbox_id/metadata/*file_path", get(get_file_metadata))
+        .route("/sandboxes/:sandbox_id/metadata/:file_path", get(get_file_metadata))
         .route("/sandboxes/:sandbox_id/permissions/*file_path", put(set_permissions))
         
         // Advanced operations

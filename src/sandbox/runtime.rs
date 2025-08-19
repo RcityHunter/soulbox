@@ -76,19 +76,22 @@ impl SandboxRuntime for DockerRuntime {
         Ok(Arc::new(DockerSandboxInstance { container }))
     }
 
-    async fn get_sandbox(&self, _sandbox_id: &str) -> Option<Arc<dyn SandboxInstance>> {
-        // TODO: Implement container lookup
-        None
+    async fn get_sandbox(&self, sandbox_id: &str) -> Option<Arc<dyn SandboxInstance>> {
+        if let Some(container) = self.container_manager.get_container(sandbox_id).await {
+            Some(Arc::new(DockerSandboxInstance { container }))
+        } else {
+            None
+        }
     }
 
-    async fn remove_sandbox(&self, _sandbox_id: &str) -> Result<()> {
-        // TODO: Implement container removal
+    async fn remove_sandbox(&self, sandbox_id: &str) -> Result<()> {
+        self.container_manager.remove_container(sandbox_id).await?;
         Ok(())
     }
 
     async fn list_sandboxes(&self) -> Result<Vec<String>> {
-        // TODO: Implement container listing
-        Ok(vec![])
+        let containers = self.container_manager.list_containers().await?;
+        Ok(containers.into_iter().map(|info| info.sandbox_id).collect())
     }
 
 }

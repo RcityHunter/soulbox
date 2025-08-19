@@ -4,7 +4,7 @@
 //! It includes endpoints for retrieving usage statistics, real-time metrics, and billing records.
 
 use crate::billing::{BillingService, models::*};
-use crate::auth::middleware::AuthContext;
+use crate::auth::middleware::{AuthContext, AuthExtractor};
 use crate::error::{SoulBoxError, Result};
 use axum::{
     extract::{Path, Query, State},
@@ -118,9 +118,9 @@ pub fn create_billing_routes() -> Router<BillingApiState> {
 async fn get_usage_summary(
     State(state): State<BillingApiState>,
     Query(params): Query<UsageQuery>,
-    auth: AuthContext,
-) -> Result<Json<UsageSummaryResponse>> {
-    let user_id = auth.user_id;
+    auth: AuthExtractor,
+) -> std::result::Result<Json<UsageSummaryResponse>, SoulBoxError> {
+    let user_id = auth.0.user_id;
     
     // Default to last 30 days if not specified
     let end_time = params.end_time.unwrap_or_else(Utc::now);
@@ -161,9 +161,9 @@ async fn get_usage_summary(
 async fn record_usage(
     State(state): State<BillingApiState>,
     Json(request): Json<RecordUsageRequest>,
-    auth: AuthContext,
-) -> Result<StatusCode> {
-    let user_id = auth.user_id;
+    auth: AuthExtractor,
+) -> std::result::Result<StatusCode, SoulBoxError> {
+    let user_id = auth.0.user_id;
 
     // Parse metric type
     let metric_type = parse_metric_type(&request.metric_type)
@@ -191,9 +191,9 @@ async fn record_usage(
 async fn get_realtime_usage(
     State(state): State<BillingApiState>,
     Query(_params): Query<UsageQuery>,
-    auth: AuthContext,
-) -> Result<Json<Vec<RealtimeUsageResponse>>> {
-    let user_id = auth.user_id;
+    auth: AuthExtractor,
+) -> std::result::Result<Json<Vec<RealtimeUsageResponse>>, SoulBoxError> {
+    let user_id = auth.0.user_id;
 
     // For demo purposes, get usage from the last hour
     let end_time = Utc::now();
@@ -231,9 +231,9 @@ async fn get_realtime_usage(
 /// Server-sent events stream for real-time usage updates
 async fn realtime_usage_stream(
     State(state): State<BillingApiState>,
-    auth: AuthContext,
+    auth: AuthExtractor,
 ) -> Sse<impl tokio_stream::Stream<Item = std::result::Result<Event, Infallible>>> {
-    let user_id = auth.user_id;
+    let user_id = auth.0.user_id;
     let billing_service = state.billing_service.clone();
 
     let stream = IntervalStream::new(interval(Duration::from_secs(5)))
@@ -267,9 +267,9 @@ async fn realtime_usage_stream(
 async fn get_session_usage(
     State(state): State<BillingApiState>,
     Path(session_id): Path<Uuid>,
-    auth: AuthContext,
-) -> Result<Json<Vec<UsageMetric>>> {
-    let _user_id = auth.user_id; // For authorization check
+    auth: AuthExtractor,
+) -> std::result::Result<Json<Vec<UsageMetric>>, SoulBoxError> {
+    let _user_id = auth.0.user_id; // For authorization check
 
     let metrics = state.billing_service
         .get_realtime_usage(session_id)
@@ -286,9 +286,9 @@ async fn get_session_usage(
 async fn get_billing_records(
     State(state): State<BillingApiState>,
     Query(params): Query<UsageQuery>,
-    auth: AuthContext,
-) -> Result<Json<Vec<BillingRecordResponse>>> {
-    let user_id = auth.user_id;
+    auth: AuthExtractor,
+) -> std::result::Result<Json<Vec<BillingRecordResponse>>, SoulBoxError> {
+    let user_id = auth.0.user_id;
 
     // Validate query parameters
     if let Some(limit) = params.limit {
@@ -332,9 +332,9 @@ async fn get_billing_records(
 async fn get_billing_record(
     State(state): State<BillingApiState>,
     Path(_record_id): Path<Uuid>,
-    auth: AuthContext,
-) -> Result<Json<BillingRecordResponse>> {
-    let _user_id = auth.user_id; // For authorization
+    auth: AuthExtractor,
+) -> std::result::Result<Json<BillingRecordResponse>, SoulBoxError> {
+    let _user_id = auth.0.user_id; // For authorization
 
     // Placeholder implementation
     Err(SoulBoxError::not_found("Billing record not found"))
@@ -359,9 +359,9 @@ pub struct CostEstimateResponse {
 async fn estimate_cost(
     State(state): State<BillingApiState>,
     Json(request): Json<CostEstimateRequest>,
-    auth: AuthContext,
-) -> Result<Json<CostEstimateResponse>> {
-    let _user_id = auth.user_id;
+    auth: AuthExtractor,
+) -> std::result::Result<Json<CostEstimateResponse>, SoulBoxError> {
+    let _user_id = auth.0.user_id;
 
     // Convert string metric types to MetricType enum
     let mut usage_map = HashMap::new();
@@ -404,9 +404,9 @@ async fn estimate_cost(
 async fn get_user_invoices(
     State(state): State<BillingApiState>,
     Query(params): Query<UsageQuery>,
-    auth: AuthContext,
-) -> Result<Json<Vec<InvoiceResponse>>> {
-    let _user_id = auth.user_id;
+    auth: AuthExtractor,
+) -> std::result::Result<Json<Vec<InvoiceResponse>>, SoulBoxError> {
+    let _user_id = auth.0.user_id;
 
     // Placeholder implementation
     let invoices = Vec::new();
@@ -426,9 +426,9 @@ async fn get_user_invoices(
 async fn get_invoice(
     State(state): State<BillingApiState>,
     Path(invoice_id): Path<Uuid>,
-    auth: AuthContext,
-) -> Result<Json<InvoiceResponse>> {
-    let _user_id = auth.user_id;
+    auth: AuthExtractor,
+) -> std::result::Result<Json<InvoiceResponse>, SoulBoxError> {
+    let _user_id = auth.0.user_id;
 
     // Placeholder implementation
     Err(SoulBoxError::not_found("Invoice not found"))
@@ -444,9 +444,9 @@ async fn update_invoice_status(
     State(state): State<BillingApiState>,
     Path(invoice_id): Path<Uuid>,
     Json(request): Json<UpdateInvoiceStatusRequest>,
-    auth: AuthContext,
-) -> Result<StatusCode> {
-    let _user_id = auth.user_id;
+    auth: AuthExtractor,
+) -> std::result::Result<StatusCode, SoulBoxError> {
+    let _user_id = auth.0.user_id;
 
     // Parse status
     let _status = parse_invoice_status(&request.status)
@@ -461,9 +461,9 @@ async fn update_invoice_status(
 /// Real-time metrics stream for dashboard
 async fn realtime_metrics_stream(
     State(state): State<BillingApiState>,
-    auth: AuthContext,
+    auth: AuthExtractor,
 ) -> Sse<impl tokio_stream::Stream<Item = std::result::Result<Event, Infallible>>> {
-    let _user_id = auth.user_id;
+    let _user_id = auth.0.user_id;
     let billing_service = state.billing_service.clone();
 
     let stream = IntervalStream::new(interval(Duration::from_secs(2)))

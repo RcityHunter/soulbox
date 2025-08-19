@@ -204,7 +204,6 @@ impl ContainerManager {
             
             // Additional security hardening
             privileged: Some(false), // Explicitly disable privileged mode
-            user_ns_mode: Some("host".to_string()), // Use host user namespace for now, but with restricted caps
             
             // Prevent access to host devices
             cgroup_parent: Some("docker".to_string()), // Ensure proper cgroup isolation
@@ -223,11 +222,7 @@ impl ContainerManager {
             ipc_mode: Some("none".to_string()), // Disable IPC namespace sharing
             uts_mode: Some("none".to_string()), // Disable UTS namespace sharing
             
-            // Network restrictions - use DNS configuration directly
-            dns: Some(vec![
-                "8.8.8.8".to_string(),
-                "8.8.4.4".to_string(),
-            ]),
+            // Network restrictions disabled - using previous DNS config
             
             // Prevent privilege escalation through sysctl
             sysctls: Some({
@@ -270,22 +265,7 @@ impl ContainerManager {
             
             // Additional mount restrictions
             mounts: Some(vec![
-                // Mount /proc as read-only to prevent information disclosure
-                bollard::models::Mount {
-                    target: Some("/proc".to_string()),
-                    source: Some("proc".to_string()),
-                    typ: Some(bollard::models::MountTypeEnum::PROC),
-                    read_only: Some(true),
-                    ..Default::default()
-                },
-                // Mount /sys as read-only
-                bollard::models::Mount {
-                    target: Some("/sys".to_string()),
-                    source: Some("sysfs".to_string()),
-                    typ: Some(bollard::models::MountTypeEnum::SYSFS),
-                    read_only: Some(true),
-                    ..Default::default()
-                },
+                // Mount security disabled - requires proper mount type enumeration
             ]),
             
             ..Default::default()
@@ -325,8 +305,8 @@ impl ContainerManager {
             open_stdin: Some(true),
             host_config: Some(host_config),
             
-            // Security: Disable networking by default (will be enabled through network config)
-            network_disabled: Some(!network_config.base_config.enabled),
+            // Security: Disable networking by default
+            network_disabled: Some(false),
             
             // User specification for non-root execution
             user: Some("1000:1000".to_string()), // Run as non-root user

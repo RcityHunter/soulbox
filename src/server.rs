@@ -79,9 +79,9 @@ impl Server {
         // 创建认证管理器并强制使用安全的JWT配置
         let jwt_secret = std::env::var("JWT_SECRET")
             .map_err(|_| SoulBoxError::Configuration {
+                message: "JWT_SECRET environment variable is required for production use. Please set a strong, randomly generated secret of at least 32 characters.".to_string(),
                 parameter: "JWT_SECRET".to_string(),
-                reason: "environment variable is required for production use. \
-                Please set a strong, randomly generated secret of at least 32 characters.".to_string()
+                reason: "environment variable is required for production use. Please set a strong, randomly generated secret of at least 32 characters.".to_string()
             })?;
         
         let jwt_manager = Arc::new(JwtManager::new(
@@ -89,6 +89,7 @@ impl Server {
             "soulbox".to_string(),
             "soulbox-api".to_string(),
         ).map_err(|e| SoulBoxError::Configuration {
+            message: format!("Failed to initialize JWT manager with secure configuration: {}", e),
             parameter: "JWT_MANAGER".to_string(),
             reason: format!("Failed to initialize JWT manager with secure configuration: {}", e)
         })?);

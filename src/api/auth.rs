@@ -178,6 +178,7 @@ async fn refresh_token(
     let claims = auth_state
         .jwt_manager
         .validate_refresh_token(&request.refresh_token)
+        .await
         .map_err(|e| {
             warn!("Invalid refresh token: {}", e);
             StatusCode::UNAUTHORIZED

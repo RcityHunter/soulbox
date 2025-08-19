@@ -61,7 +61,7 @@ struct CachedSerialization {
 }
 
 /// Available serialization formats
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SerializationFormat {
     Json,
     MessagePack,

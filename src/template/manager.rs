@@ -99,6 +99,9 @@ impl TemplateManager {
         _user_id: uuid::Uuid,
     ) -> SoulBoxResult<Template> {
         info!("Template cloning temporarily disabled during database migration");
-        Err(crate::error::SoulBoxError::NotImplemented("Template cloning not yet implemented".into()))
+        Err(crate::error::SoulBoxError::NotImplemented {
+            feature: "Template cloning not yet implemented".to_string(),
+            planned_version: Some("v0.2.0".to_string()),
+        })
     }
 }

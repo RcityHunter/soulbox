@@ -340,6 +340,7 @@ impl SoulBoxError {
         user_id: Option<Uuid>,
         ip_address: Option<std::net::IpAddr>,
     ) -> Self {
+        let message_str = message.into();
         let context = SecurityContext {
             user_id,
             ip_address,
@@ -348,10 +349,10 @@ impl SoulBoxError {
         };
         
         let error_id = Uuid::new_v4();
-        error!("Security violation detected: {} (ID: {})", message.into(), error_id);
+        error!("Security violation detected: {} (ID: {})", message_str, error_id);
         
         Self::SecurityViolation {
-            message: message.into(),
+            message: message_str,
             context,
         }
     }
@@ -362,6 +363,7 @@ impl SoulBoxError {
         user_id: Option<Uuid>,
         ip_address: Option<std::net::IpAddr>,
     ) -> Self {
+        let reason_str = reason.into();
         let context = SecurityContext {
             user_id,
             ip_address,
@@ -370,10 +372,10 @@ impl SoulBoxError {
         };
         
         warn!("Authentication failed: {} (User: {:?}, IP: {:?})", 
-              reason.into(), user_id, ip_address);
+              reason_str, user_id, ip_address);
         
         Self::Authentication {
-            reason: reason.into(),
+            reason: reason_str,
             user_id,
             ip_address,
             attempt_count: None,
@@ -395,12 +397,15 @@ impl SoulBoxError {
             timestamp: Utc::now(),
         };
         
+        let resource_str = resource.into();
+        let permission_str = permission.into();
+        
         warn!("Authorization denied: user {} (role: {:?}) attempted {} on {}", 
-              user_id, role, permission.into(), resource.into());
+              user_id, role, &permission_str, &resource_str);
         
         Self::Authorization {
-            resource: resource.into(),
-            permission: permission.into(),
+            resource: resource_str,
+            permission: permission_str,
             user_id,
             role,
             security_context: context,
@@ -441,10 +446,12 @@ impl SoulBoxError {
         retry_after: chrono::Duration,
         user_id: Option<Uuid>,
     ) -> Self {
-        warn!("Rate limit exceeded for resource '{}' by user {:?}", resource.into(), user_id);
+        let resource_str = resource.into();
+        
+        warn!("Rate limit exceeded for resource '{}' by user {:?}", &resource_str, user_id);
         
         Self::RateLimitExceeded {
-            resource: resource.into(),
+            resource: resource_str,
             limit,
             window: window.into(),
             retry_after,
@@ -625,9 +632,6 @@ impl SoulBoxError {
     }
 
 
-    pub fn internal(msg: impl Into<String>) -> Self {
-        Self::Internal(msg.into())
-    }
 
     pub fn filesystem(msg: impl Into<String>) -> Self {
         Self::Filesystem(msg.into())
@@ -669,9 +673,6 @@ impl SoulBoxError {
         Self::Timeout(msg.into())
     }
 
-    pub fn validation(msg: impl Into<String>) -> Self {
-        Self::Validation(msg.into())
-    }
 
     pub fn api(msg: impl Into<String>) -> Self {
         Self::Api(msg.into())
@@ -688,10 +689,14 @@ impl SoulBoxError {
     /// Get error code for consistent error handling across APIs
     pub fn error_code(&self) -> &'static str {
         match self {
+            SoulBoxError::SecurityViolation { .. } => "SECURITY_VIOLATION",
+            SoulBoxError::ValidationError { .. } => "VALIDATION_ERROR",
+            SoulBoxError::RateLimitExceeded { .. } => "RATE_LIMIT_EXCEEDED",
+            SoulBoxError::ResourceExhausted { .. } => "RESOURCE_EXHAUSTED",
             SoulBoxError::Configuration { .. } => "CONFIG_ERROR",
-            SoulBoxError::Sandbox(_) => "SANDBOX_ERROR",
-            SoulBoxError::Authentication(_) => "AUTH_ERROR",
-            SoulBoxError::Authorization(_) => "AUTHZ_ERROR",
+            SoulBoxError::Sandbox { .. } => "SANDBOX_ERROR",
+            SoulBoxError::Authentication { .. } => "AUTH_ERROR",
+            SoulBoxError::Authorization { .. } => "AUTHZ_ERROR",
             SoulBoxError::Io(_) => "IO_ERROR",
             SoulBoxError::Json(_) => "JSON_ERROR",
             SoulBoxError::TomlDe(_) => "TOML_PARSE_ERROR",
@@ -716,6 +721,8 @@ impl SoulBoxError {
             SoulBoxError::Api(_) => "API_ERROR",
             SoulBoxError::Cli(_) => "CLI_ERROR",
             SoulBoxError::Provider(_) => "PROVIDER_ERROR",
+            SoulBoxError::NotImplemented { .. } => "NOT_IMPLEMENTED",
+            _ => "UNKNOWN_ERROR",
         }
     }
 
@@ -727,8 +734,8 @@ impl SoulBoxError {
             SoulBoxError::Transport(_) => true,
             SoulBoxError::WebSocket(_) => true,
             SoulBoxError::ResourceLimit(_) => false,
-            SoulBoxError::Authentication(_) => false,
-            SoulBoxError::Authorization(_) => false,
+            SoulBoxError::Authentication { .. } => false,
+            SoulBoxError::Authorization { .. } => false,
             SoulBoxError::Validation(_) => false,
             SoulBoxError::NotFound(_) => false,
             SoulBoxError::Unsupported(_) => false,
@@ -739,8 +746,8 @@ impl SoulBoxError {
     /// Get HTTP status code for web API responses
     pub fn http_status(&self) -> u16 {
         match self {
-            SoulBoxError::Authentication(_) => 401,
-            SoulBoxError::Authorization(_) => 403,
+            SoulBoxError::Authentication { .. } => 401,
+            SoulBoxError::Authorization { .. } => 403,
             SoulBoxError::NotFound(_) => 404,
             SoulBoxError::Validation(_) => 400,
             SoulBoxError::ResourceLimit(_) => 429,
@@ -755,5 +762,48 @@ impl SoulBoxError {
 impl From<prometheus::Error> for SoulBoxError {
     fn from(err: prometheus::Error) -> Self {
         SoulBoxError::Prometheus(err.to_string())
+    }
+}
+
+// Axum IntoResponse implementation for SoulBoxError
+impl axum::response::IntoResponse for SoulBoxError {
+    fn into_response(self) -> axum::response::Response {
+        use axum::http::StatusCode;
+        use axum::response::Json;
+        use serde_json::json;
+
+        let status_code = match &self {
+            SoulBoxError::NotFound { .. } => StatusCode::NOT_FOUND,
+            SoulBoxError::Unauthorized { .. } => StatusCode::UNAUTHORIZED,
+            SoulBoxError::Forbidden { .. } => StatusCode::FORBIDDEN,
+            SoulBoxError::ValidationError { .. } => StatusCode::BAD_REQUEST,
+            SoulBoxError::RateLimitExceeded { .. } => StatusCode::TOO_MANY_REQUESTS,
+            SoulBoxError::ResourceExhausted { .. } => StatusCode::TOO_MANY_REQUESTS,
+            SoulBoxError::SecurityViolation { .. } => StatusCode::FORBIDDEN,
+            SoulBoxError::Config(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+
+        let error_message = match &self {
+            SoulBoxError::NotFound { message, .. } => message.clone(),
+            SoulBoxError::Unauthorized { message, .. } => message.clone(),
+            SoulBoxError::Forbidden { message, .. } => message.clone(),
+            SoulBoxError::ValidationError { message, .. } => message.clone(),
+            SoulBoxError::RateLimitExceeded { message, .. } => message.clone(),
+            SoulBoxError::ResourceExhausted { message, .. } => message.clone(),
+            SoulBoxError::SecurityViolation { message, .. } => message.clone(),
+            SoulBoxError::Config(msg) => msg.clone(),
+            _ => "Internal server error".to_string(),
+        };
+
+        let error_response = json!({
+            "error": {
+                "message": error_message,
+                "type": self.error_type(),
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }
+        });
+
+        (status_code, Json(error_response)).into_response()
     }
 }

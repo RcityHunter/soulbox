@@ -92,7 +92,7 @@ pub struct PortMappingManager {
     /// Currently allocated ports
     allocated_ports: Arc<Mutex<HashMap<u16, PortAllocation>>>,
     /// Ports allocated by sandbox
-    sandbox_ports: Arc<Mutex<HashMap<String, Vec<u16>>>>,
+    sandbox_ports: Arc<Mutex<HashMap<String, Vec<PortAllocation>>>>,
     /// Port allocation statistics
     stats: Arc<Mutex<PortMappingStats>>,
 }
@@ -202,7 +202,7 @@ impl PortMappingManager {
             allocated.insert(host_port, allocation.clone());
             
             // Update sandbox mappings
-            let mut sandbox_mappings = self.sandbox_mappings.lock().unwrap();
+            let mut sandbox_mappings = self.sandbox_ports.lock().unwrap();
             sandbox_mappings
                 .entry(sandbox_id.to_string())
                 .or_insert_with(Vec::new)
@@ -262,14 +262,15 @@ impl PortMappingManager {
                     sandbox_id: sandbox_id.to_string(),
                     container_port,
                     host_port: port,
-                    protocol: PortProtocol::Tcp, // Default to TCP
+                    protocol: "tcp".to_string(), // Default to TCP
                     allocated_at: chrono::Utc::now(),
+                    is_active: true,
                 };
                 
                 allocated.insert(port, allocation.clone());
                 
                 // Update sandbox mappings
-                let mut sandbox_mappings = self.sandbox_mappings.lock().unwrap();
+                let mut sandbox_mappings = self.sandbox_ports.lock().unwrap();
                 sandbox_mappings
                     .entry(sandbox_id.to_string())
                     .or_insert_with(Vec::new)
@@ -361,7 +362,7 @@ impl PortMappingManager {
             sandbox_ports
                 .entry(sandbox_id.to_string())
                 .or_insert_with(Vec::new)
-                .push(host_port);
+                .push(allocation.clone());
         }
         
         // Update stats
@@ -384,10 +385,10 @@ impl PortMappingManager {
         let mut allocated = self.allocated_ports.lock().unwrap();
         let mut stats = self.stats.lock().unwrap();
         
-        for port in ports_to_release {
-            if allocated.remove(&port).is_some() {
+        for allocation in ports_to_release {
+            if allocated.remove(&allocation.host_port).is_some() {
                 stats.active_allocations = stats.active_allocations.saturating_sub(1);
-                debug!("Released port {} for sandbox {}", port, sandbox_id);
+                debug!("Released port {} for sandbox {}", allocation.host_port, sandbox_id);
             }
         }
         
@@ -406,7 +407,7 @@ impl PortMappingManager {
             {
                 let mut sandbox_ports = self.sandbox_ports.lock().unwrap();
                 if let Some(ports) = sandbox_ports.get_mut(&allocation.sandbox_id) {
-                    ports.retain(|&p| p != host_port);
+                    ports.retain(|p| p.host_port != host_port);
                     if ports.is_empty() {
                         sandbox_ports.remove(&allocation.sandbox_id);
                     }
@@ -429,16 +430,10 @@ impl PortMappingManager {
     /// Get all ports allocated to a sandbox
     pub fn get_sandbox_ports(&self, sandbox_id: &str) -> Vec<PortAllocation> {
         let sandbox_ports = self.sandbox_ports.lock().unwrap();
-        let allocated = self.allocated_ports.lock().unwrap();
         
         sandbox_ports
             .get(sandbox_id)
-            .map(|ports| {
-                ports
-                    .iter()
-                    .filter_map(|&port| allocated.get(&port).cloned())
-                    .collect()
-            })
+            .cloned()
             .unwrap_or_default()
     }
     

@@ -739,7 +739,7 @@ impl TaskTracker {
     }
     
     pub async fn get_stats(&self) -> TaskStats {
-        let tasks = self.tasks.lock().await;
+        let tasks = self.tasks.lock().unwrap();
         TaskStats {
             active_tasks: tasks.len(),
             cancelled: self.cancelled.load(Ordering::Relaxed),
