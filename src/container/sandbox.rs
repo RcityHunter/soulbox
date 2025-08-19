@@ -5,12 +5,12 @@ use bollard::Docker;
 use bollard::container::{StartContainerOptions, StopContainerOptions, RemoveContainerOptions, StatsOptions};
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use futures_util::stream::StreamExt;
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 
 use crate::error::{Result, SoulBoxError};
 use super::{ResourceLimits, NetworkConfig, PortMapping};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SandboxContainer {
     id: String,
     container_id: String,
@@ -20,6 +20,8 @@ pub struct SandboxContainer {
     env_vars: HashMap<String, String>,
     /// Docker client for container operations
     docker: Arc<Docker>,
+    /// Track if container has been cleaned up
+    cleaned_up: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl SandboxContainer {
@@ -41,6 +43,7 @@ impl SandboxContainer {
             network_config,
             env_vars,
             docker,
+            cleaned_up: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
 
@@ -305,6 +308,58 @@ impl SandboxContainer {
         }
     }
 
+    /// Manually cleanup container resources
+    pub async fn cleanup(&self) -> Result<()> {
+        use std::sync::atomic::Ordering;
+        
+        if self.cleaned_up.compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed).is_ok() {
+            // Only cleanup if not already cleaned up
+            match self.docker.remove_container(&self.container_id, Some(RemoveContainerOptions {
+                force: true,
+                ..Default::default()
+            })).await {
+                Ok(_) => {
+                    info!("Container {} cleaned up successfully", self.container_id);
+                }
+                Err(e) => {
+                    error!("Failed to cleanup container {}: {}", self.container_id, e);
+                    // Don't propagate error to avoid panic in Drop
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Check if container has been cleaned up
+    pub fn is_cleaned_up(&self) -> bool {
+        self.cleaned_up.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl Drop for SandboxContainer {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering;
+        
+        if self.cleaned_up.compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed).is_ok() {
+            let container_id = self.container_id.clone();
+            let docker = self.docker.clone();
+            
+            // 在后台线程中清理资源，避免阻塞Drop
+            tokio::spawn(async move {
+                match docker.remove_container(&container_id, Some(RemoveContainerOptions {
+                    force: true,
+                    ..Default::default()
+                })).await {
+                    Ok(_) => {
+                        info!("Container {} cleaned up in background during drop", container_id);
+                    }
+                    Err(e) => {
+                        error!("Failed to cleanup container {} during drop: {}", container_id, e);
+                    }
+                }
+            });
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

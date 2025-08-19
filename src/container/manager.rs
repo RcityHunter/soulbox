@@ -4,7 +4,7 @@ use tokio::sync::RwLock;
 use bollard::Docker;
 use bollard::container::{Config as ContainerConfig, CreateContainerOptions};
 use bollard::models::HostConfig;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 
 use crate::{error::Result, config::Config};
 use crate::network::{NetworkManager, SandboxNetworkConfig, NetworkError};
@@ -16,10 +16,14 @@ pub struct ContainerManager {
     docker: Arc<Docker>,
     /// Active container instances - using RwLock for better read performance
     containers: Arc<RwLock<HashMap<String, Arc<SandboxContainer>>>>,
+    /// Container operation semaphore to limit concurrent operations
+    operation_semaphore: Arc<tokio::sync::Semaphore>,
     /// Global configuration
     config: Config,
     /// Network manager for handling network configurations
     network_manager: Arc<tokio::sync::Mutex<NetworkManager>>,
+    /// Container creation counter for atomic ID generation
+    creation_counter: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl ContainerManager {
@@ -45,8 +49,10 @@ impl ContainerManager {
         Ok(Self {
             docker: Arc::new(docker),
             containers: Arc::new(RwLock::new(HashMap::new())),
+            operation_semaphore: Arc::new(tokio::sync::Semaphore::new(10)), // Limit to 10 concurrent container operations
             config,
             network_manager: Arc::new(tokio::sync::Mutex::new(NetworkManager::new())),
+            creation_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         })
     }
 
@@ -59,6 +65,10 @@ impl ContainerManager {
         network_config: NetworkConfig,
         env_vars: HashMap<String, String>,
     ) -> Result<Arc<SandboxContainer>> {
+        // Acquire operation permit to prevent resource contention
+        let _permit = self.operation_semaphore.acquire().await
+            .map_err(|_| crate::error::SoulBoxError::internal("Failed to acquire operation permit".to_string()))?;
+
         // Convert basic NetworkConfig to SandboxNetworkConfig
         let sandbox_network_config = SandboxNetworkConfig {
             base_config: network_config,
@@ -83,7 +93,11 @@ impl ContainerManager {
         network_config: SandboxNetworkConfig,
         env_vars: HashMap<String, String>,
     ) -> Result<Arc<SandboxContainer>> {
-        info!("Creating container for sandbox: {} with image: {}", sandbox_id, image);
+        // Generate unique container ID to avoid conflicts
+        let creation_id = self.creation_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let container_id = format!("soulbox_{}_{}", sandbox_id, creation_id);
+        
+        info!("Creating container {} for sandbox: {} with image: {}", container_id, sandbox_id, image);
         
         // Configure network settings before container creation
         let network_name = {
@@ -253,9 +267,17 @@ impl ContainerManager {
             Arc::clone(&self.docker),
         )?);
         
-        // Store in our container registry
-        let mut containers = self.containers.write().await;
-        containers.insert(sandbox_id.to_string(), container.clone());
+        // Store in our container registry with atomic check-and-insert
+        {
+            let mut containers = self.containers.write().await;
+            // Check if sandbox_id already exists to prevent overwrites
+            if containers.contains_key(sandbox_id) {
+                return Err(crate::error::SoulBoxError::internal(
+                    format!("Sandbox {} already has an active container", sandbox_id)
+                ));
+            }
+            containers.insert(sandbox_id.to_string(), container.clone());
+        }
         
         info!("Container {} created and registered for sandbox {}", container_id, sandbox_id);
         
@@ -293,16 +315,43 @@ impl ContainerManager {
     }
     
     pub async fn remove_container(&self, sandbox_id: &str) -> Result<bool> {
-        // Clean up network configuration first
-        {
-            let mut net_mgr = self.network_manager.lock().await;
-            if let Err(e) = net_mgr.cleanup_sandbox_network(sandbox_id).await {
-                error!("Failed to cleanup network for sandbox {}: {}", sandbox_id, e);
+        // Acquire operation permit to prevent resource contention during removal
+        let _permit = self.operation_semaphore.acquire().await
+            .map_err(|_| crate::error::SoulBoxError::internal("Failed to acquire operation permit".to_string()))?;
+
+        // First retrieve the container before removing it
+        let container = {
+            let containers = self.containers.read().await;
+            containers.get(sandbox_id).cloned()
+        };
+
+        if let Some(container) = container {
+            // Clean up container resources first
+            if let Err(e) = container.cleanup().await {
+                error!("Failed to cleanup container resources for sandbox {}: {}", sandbox_id, e);
             }
+            
+            // Clean up network configuration
+            {
+                let mut net_mgr = self.network_manager.lock().await;
+                if let Err(e) = net_mgr.cleanup_sandbox_network(sandbox_id).await {
+                    error!("Failed to cleanup network for sandbox {}: {}", sandbox_id, e);
+                }
+            }
+            
+            // Remove from registry atomically
+            let mut containers = self.containers.write().await;
+            let removed = containers.remove(sandbox_id).is_some();
+            
+            if removed {
+                info!("Successfully removed container for sandbox: {}", sandbox_id);
+            }
+            
+            Ok(removed)
+        } else {
+            warn!("Attempted to remove non-existent container for sandbox: {}", sandbox_id);
+            Ok(false)
         }
-        
-        let mut containers = self.containers.write().await;
-        Ok(containers.remove(sandbox_id).is_some())
     }
     
     /// Apply network bandwidth limits to a container using tc (traffic control)

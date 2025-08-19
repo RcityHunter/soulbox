@@ -123,21 +123,71 @@ impl PoolContainer {
         }
     }
 
-    /// Mark container as used
-    pub fn mark_used(&mut self) {
-        self.last_used = Instant::now();
+    /// Mark container as in use
+    pub fn mark_in_use(&mut self) {
         self.in_use = true;
+        self.last_used = Instant::now();
     }
 
-    /// Mark container as available
-    pub fn mark_available(&mut self) {
-        self.last_used = Instant::now();
+    /// Mark container as released
+    pub fn mark_released(&mut self) {
         self.in_use = false;
+        self.last_used = Instant::now();
     }
 
     /// Check if container is idle for too long
     pub fn is_idle(&self, max_idle_time: Duration) -> bool {
         !self.in_use && self.last_used.elapsed() > max_idle_time
+    }
+}
+
+/// Resource cleanup wrapper for containers
+pub struct ContainerHandle {
+    container_id: String,
+    manager: Arc<ContainerManager>,
+    cleaned_up: bool,
+}
+
+impl ContainerHandle {
+    pub fn new(container_id: String, manager: Arc<ContainerManager>) -> Self {
+        Self {
+            container_id,
+            manager,
+            cleaned_up: false,
+        }
+    }
+
+    /// Manually cleanup container resources
+    pub async fn cleanup(&mut self) -> Result<()> {
+        if !self.cleaned_up {
+            self.manager.remove_container(&self.container_id).await?;
+            self.cleaned_up = true;
+            info!("Container {} cleaned up successfully", self.container_id);
+        }
+        Ok(())
+    }
+
+    /// Get container ID
+    pub fn id(&self) -> &str {
+        &self.container_id
+    }
+}
+
+impl Drop for ContainerHandle {
+    fn drop(&mut self) {
+        if !self.cleaned_up {
+            let container_id = self.container_id.clone();
+            let manager = self.manager.clone();
+            
+            // 在后台线程中清理资源，避免阻塞Drop
+            tokio::spawn(async move {
+                if let Err(e) = manager.remove_container(&container_id).await {
+                    error!("Failed to cleanup container {} during drop: {}", container_id, e);
+                } else {
+                    info!("Container {} cleaned up in background during drop", container_id);
+                }
+            });
+        }
     }
 }
 
@@ -276,7 +326,7 @@ impl ContainerPool {
         let mut pools = self.pools.write().await;
         if let Some(pool) = pools.get_mut(&runtime) {
             let mut container = PoolContainer::new(container_id.clone(), runtime.clone());
-            container.mark_available();
+            container.mark_released();
             container.warmed_up = true;
             container.healthy = true;
             
@@ -309,7 +359,7 @@ impl ContainerPool {
             for i in 0..pool.len() {
                 if !pool[i].in_use && pool[i].healthy {
                     let mut container = pool.remove(i).unwrap();
-                    container.mark_used();
+                    container.mark_in_use();
                     return Some(container);
                 }
             }
@@ -319,8 +369,6 @@ impl ContainerPool {
 
     /// Create a new container with atomic operations and proper error handling
     async fn create_new_container(&self, runtime: &RuntimeType) -> Result<String> {
-        use parking_lot::Mutex;
-        use std::sync::atomic::{AtomicU64, Ordering};
         
         let runtime_config = self.config.runtime_configs.get(runtime)
             .ok_or_else(|| SoulBoxError::PoolError(format!("No config for runtime {:?}", runtime)))?;
@@ -809,10 +857,10 @@ mod tests {
         assert!(!container.warmed_up);
         assert!(container.healthy);
 
-        container.mark_used();
+        container.mark_in_use();
         assert!(container.in_use);
 
-        container.mark_available();
+        container.mark_released();
         assert!(!container.in_use);
 
         // Test idle check

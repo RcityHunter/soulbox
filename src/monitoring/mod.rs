@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 use crate::error::{Result, SoulBoxError};
 
@@ -206,10 +206,12 @@ impl PerformanceMetrics {
         self.cpu_usage.last().map(|snapshot| snapshot.usage_percent)
     }
 
-    /// Maintain circular buffer with fixed size
+    /// Maintain circular buffer with fixed size - efficient implementation
     fn maintain_circular_buffer<T>(buffer: &mut Vec<T>, max_size: usize) {
-        while buffer.len() > max_size {
-            buffer.remove(0);
+        if buffer.len() > max_size {
+            // More efficient: drain from the front instead of multiple remove(0) calls
+            let excess = buffer.len() - max_size;
+            buffer.drain(0..excess);
         }
     }
 
@@ -266,6 +268,60 @@ impl HasTimestamp for MemorySnapshot {
 impl HasTimestamp for CpuSnapshot {
     fn timestamp(&self) -> Instant {
         self.timestamp
+    }
+}
+
+/// High-performance circular buffer with fixed capacity
+/// Uses VecDeque for O(1) operations at both ends
+pub struct CircularBuffer<T> {
+    buffer: VecDeque<T>,
+    capacity: usize,
+}
+
+impl<T> CircularBuffer<T> {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            buffer: VecDeque::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    /// Add item to buffer, removing oldest if at capacity
+    pub fn push(&mut self, item: T) {
+        if self.buffer.len() >= self.capacity {
+            self.buffer.pop_front();
+        }
+        self.buffer.push_back(item);
+    }
+
+    /// Get reference to all items
+    pub fn items(&self) -> &VecDeque<T> {
+        &self.buffer
+    }
+
+    /// Get the most recent item
+    pub fn last(&self) -> Option<&T> {
+        self.buffer.back()
+    }
+
+    /// Get buffer length
+    pub fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    /// Check if buffer is empty
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
+    /// Clear all items
+    pub fn clear(&mut self) {
+        self.buffer.clear();
+    }
+
+    /// Get capacity
+    pub fn capacity(&self) -> usize {
+        self.capacity
     }
 }
 

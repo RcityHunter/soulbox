@@ -557,7 +557,7 @@ impl BreakpointManager {
             },
             BreakpointCondition::And(conditions) => {
                 for cond in conditions {
-                    if !self.evaluate_condition(cond, context).await {
+                    if !Box::pin(self.evaluate_condition(cond, context)).await {
                         return false;
                     }
                 }
@@ -565,7 +565,7 @@ impl BreakpointManager {
             },
             BreakpointCondition::Or(conditions) => {
                 for cond in conditions {
-                    if self.evaluate_condition(cond, context).await {
+                    if Box::pin(self.evaluate_condition(cond, context)).await {
                         return true;
                     }
                 }
@@ -617,7 +617,7 @@ impl BreakpointManager {
         }
         
         // Handle logical operators with depth control
-        if let Some(result) = self.evaluate_logical_expression_with_depth(expr, context, depth + 1).await {
+        if let Some(result) = Box::pin(self.evaluate_logical_expression_with_depth(expr, context, depth + 1)).await {
             return result;
         }
         
@@ -668,8 +668,8 @@ impl BreakpointManager {
             let left = expr[..idx].trim();
             let right = expr[idx + 2..].trim();
             
-            let left_result = self.evaluate_expression_recursive(left, context, depth).await;
-            let right_result = self.evaluate_expression_recursive(right, context, depth).await;
+            let left_result = Box::pin(self.evaluate_expression_recursive(left, context, depth)).await;
+            let right_result = Box::pin(self.evaluate_expression_recursive(right, context, depth)).await;
             
             return Some(match (left_result, right_result) {
                 (Ok(left_val), Ok(right_val)) => Ok(left_val && right_val),
@@ -682,8 +682,8 @@ impl BreakpointManager {
             let left = expr[..idx].trim();
             let right = expr[idx + 2..].trim();
             
-            let left_result = self.evaluate_expression_recursive(left, context, depth).await;
-            let right_result = self.evaluate_expression_recursive(right, context, depth).await;
+            let left_result = Box::pin(self.evaluate_expression_recursive(left, context, depth)).await;
+            let right_result = Box::pin(self.evaluate_expression_recursive(right, context, depth)).await;
             
             return Some(match (left_result, right_result) {
                 (Ok(left_val), Ok(right_val)) => Ok(left_val || right_val),

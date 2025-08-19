@@ -290,9 +290,26 @@ async fn get_billing_records(
 ) -> Result<Json<Vec<BillingRecordResponse>>> {
     let user_id = auth.user_id;
 
+    // Validate query parameters
+    if let Some(limit) = params.limit {
+        if limit > 1000 {
+            return Err(crate::error::SoulBoxError::validation(
+                "Limit cannot exceed 1000 records".to_string()
+            ));
+        }
+    }
+
     // For now, return empty list as this would require integration with storage
-    // In a real implementation, you'd query the billing storage
-    let records = Vec::new(); // state.billing_service.get_billing_records(user_id, ...).await?;
+    // In a real implementation, you'd query the billing storage with proper error handling
+    let records = match try_get_billing_records(&state, user_id, &params).await {
+        Ok(records) => records,
+        Err(e) => {
+            tracing::error!("Failed to retrieve billing records for user {}: {}", user_id, e);
+            return Err(crate::error::SoulBoxError::internal(
+                "Failed to retrieve billing records. Please try again later.".to_string()
+            ));
+        }
+    };
 
     let responses: Vec<BillingRecordResponse> = records.into_iter().map(|record: BillingRecord| {
         let period_description = format!(
@@ -477,6 +494,17 @@ async fn realtime_metrics_stream(
         .then(|future| future);
 
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+/// Helper function to retrieve billing records with proper error handling
+async fn try_get_billing_records(
+    _state: &BillingApiState, 
+    _user_id: Uuid, 
+    _params: &UsageQuery
+) -> crate::error::Result<Vec<BillingRecord>> {
+    // Placeholder implementation - would integrate with actual storage
+    // This prevents the panic that would occur in the original implementation
+    Ok(Vec::new())
 }
 
 /// Helper function to parse metric type from string

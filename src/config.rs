@@ -204,12 +204,17 @@ impl Config {
             }
         }
 
-        // Auth configuration with validation
-        if let Ok(secret) = std::env::var("JWT_SECRET") {
-            if Self::validate_jwt_secret(&secret) {
-                config.auth.jwt_secret = secret;
-            } else {
-                validation_errors.push("JWT_SECRET is too weak (minimum 32 characters required)".to_string());
+        // Auth configuration with validation - JWT_SECRET is REQUIRED
+        match std::env::var("JWT_SECRET") {
+            Ok(secret) => {
+                if Self::validate_jwt_secret_strength(&secret) {
+                    config.auth.jwt_secret = secret;
+                } else {
+                    validation_errors.push("JWT_SECRET is too weak (minimum 64 characters required for production)".to_string());
+                }
+            }
+            Err(_) => {
+                validation_errors.push("JWT_SECRET environment variable is REQUIRED for security".to_string());
             }
         }
         
@@ -299,8 +304,22 @@ impl Config {
         url.starts_with("redis://") || url.starts_with("rediss://")
     }
     
-    fn validate_jwt_secret(secret: &str) -> bool {
-        secret.len() >= 32 && secret != "your-secret-key"
+    fn validate_jwt_secret_strength(secret: &str) -> bool {
+        // 生产环境要求更严格的密钥强度
+        if secret.len() < 64 {
+            return false;
+        }
+        
+        // 检查不安全的默认值
+        let unsafe_secrets = [
+            "your-secret-key",
+            "your-super-secret-jwt-key-change-this-in-production",
+            "default-secret",
+            "secret",
+            "jwt-secret",
+        ];
+        
+        !unsafe_secrets.contains(&secret)
     }
 
     /// Load configuration from a TOML file (soulbox.toml)
@@ -312,8 +331,29 @@ impl Config {
 
     /// Validate configuration
     pub fn validate(&self) -> Result<()> {
-        if self.auth.jwt_secret == "your-secret-key" {
-            anyhow::bail!("JWT secret must be changed from default value");
+        // 检查多种不安全的默认值
+        let unsafe_secrets = [
+            "your-secret-key",
+            "your-super-secret-jwt-key-change-this-in-production",
+            "default-secret",
+            "secret",
+            "jwt-secret",
+        ];
+        
+        if unsafe_secrets.contains(&self.auth.jwt_secret.as_str()) {
+            anyhow::bail!(
+                "SECURITY ERROR: JWT secret must be changed from default value. \
+                Please set a secure JWT_SECRET environment variable or update the configuration file."
+            );
+        }
+        
+        // 强制密钥长度和强度要求
+        if self.auth.jwt_secret.len() < 64 {
+            anyhow::bail!(
+                "SECURITY ERROR: JWT secret must be at least 64 characters long for production use. \
+                Current length: {}", 
+                self.auth.jwt_secret.len()
+            );
         }
         
         if self.server.port == 0 {

@@ -505,9 +505,10 @@ impl CustomMetricRegistry {
         
         metrics.push(metric);
         
-        // Keep only recent metrics
+        // Keep only recent metrics - use efficient drain instead of remove(0)
         if metrics.len() > self.max_metrics {
-            metrics.remove(0);
+            let excess = metrics.len() - self.max_metrics;
+            metrics.drain(0..excess);
         }
         
         Ok(())

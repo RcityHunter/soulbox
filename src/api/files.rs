@@ -25,6 +25,30 @@ pub struct FileUploadRequest {
     pub content: String, // Base64 encoded content
 }
 
+impl FileUploadRequest {
+    /// Validate file upload request
+    pub fn validate(&self) -> Result<(), SoulBoxError> {
+        // Validate file path
+        validate_file_path(&self.path)?;
+        
+        // Validate content size (base64 encoded)
+        if self.content.len() > 10_000_000 { // 10MB limit for base64 content
+            return Err(SoulBoxError::validation(
+                "File content too large (max 10MB)".to_string()
+            ));
+        }
+        
+        // Validate base64 encoding
+        if let Err(_) = base64::engine::general_purpose::STANDARD.decode(&self.content) {
+            return Err(SoulBoxError::validation(
+                "Invalid base64 content encoding".to_string()
+            ));
+        }
+        
+        Ok(())
+    }
+}
+
 /// File download query parameters  
 #[derive(Debug, Deserialize)]
 pub struct FileQueryParams {
@@ -96,11 +120,16 @@ pub async fn upload_file(
     _auth: AuthExtractor,
     Json(request): Json<FileUploadRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    // Validate sandbox_id is a valid UUID
-    let _sandbox_uuid = Uuid::parse_str(&sandbox_id)
-        .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid sandbox ID"}))))?;
+    // Validate sandbox_id format
+    let _sandbox_uuid = validate_sandbox_id(&sandbox_id)
+        .map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
 
-    // Decode base64 content
+    // Validate the entire request
+    if let Err(e) = request.validate() {
+        return Err((StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))));
+    }
+
+    // Decode base64 content (already validated in request.validate())
     let content = base64::engine::general_purpose::STANDARD.decode(&request.content)
         .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid base64 content"}))))?;
 
@@ -335,4 +364,68 @@ pub fn file_routes() -> Router<AppState> {
         // Advanced operations
         .route("/sandboxes/:sandbox_id/symlinks", post(create_symlink))
         .route("/sandboxes/:sandbox_id/stats", get(get_filesystem_stats))
+}
+
+/// Validate file path for security and correctness
+fn validate_file_path(path: &str) -> Result<(), SoulBoxError> {
+    // Check path length
+    if path.len() > 4096 {
+        return Err(SoulBoxError::validation(
+            "File path too long (max 4096 characters)".to_string()
+        ));
+    }
+    
+    // Check if path is empty
+    if path.trim().is_empty() {
+        return Err(SoulBoxError::validation(
+            "File path cannot be empty".to_string()
+        ));
+    }
+    
+    // Prevent path traversal attacks
+    if path.contains("..") {
+        return Err(SoulBoxError::validation(
+            "Path traversal not allowed".to_string()
+        ));
+    }
+    
+    // Prevent absolute paths outside of sandbox
+    if path.starts_with('/') && !path.starts_with("/workspace/") {
+        return Err(SoulBoxError::validation(
+            "Absolute paths must be within /workspace/".to_string()
+        ));
+    }
+    
+    // Check for invalid characters
+    let invalid_chars = ['<', '>', ':', '"', '|', '?', '*', '\0'];
+    if path.chars().any(|c| invalid_chars.contains(&c)) {
+        return Err(SoulBoxError::validation(
+            "File path contains invalid characters".to_string()
+        ));
+    }
+    
+    // Prevent access to sensitive system files
+    let forbidden_patterns = [
+        "/proc/", "/sys/", "/dev/", "/etc/passwd", "/etc/shadow",
+        "/root/", "/home/", "/.ssh/", "/.config/"
+    ];
+    
+    let normalized_path = path.to_lowercase();
+    for pattern in &forbidden_patterns {
+        if normalized_path.contains(pattern) {
+            return Err(SoulBoxError::validation(
+                "Access to system files not allowed".to_string()
+            ));
+        }
+    }
+    
+    Ok(())
+}
+
+/// Validate sandbox ID format
+fn validate_sandbox_id(sandbox_id: &str) -> Result<Uuid, SoulBoxError> {
+    Uuid::parse_str(sandbox_id)
+        .map_err(|_| SoulBoxError::validation(
+            "Invalid sandbox ID format".to_string()
+        ))
 }
