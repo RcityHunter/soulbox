@@ -109,7 +109,7 @@ impl CliConfig {
         } else {
             // Use default config path: ~/.config/soulbox/config.toml
             let home_dir = dirs::home_dir()
-                .ok_or_else(|| SoulBoxError::Config("Could not find home directory".to_string()))?;
+                .ok_or_else(|| SoulBoxError::config("Could not find home directory".to_string()))?;
             
             Ok(home_dir.join(".config").join("soulbox").join("config.toml"))
         }
@@ -158,16 +158,16 @@ impl CliConfig {
     /// Validate configuration
     pub fn validate(&self) -> Result<()> {
         if self.server_url.is_empty() {
-            return Err(SoulBoxError::Config("Server URL cannot be empty".to_string()));
+            return Err(SoulBoxError::config("Server URL cannot be empty".to_string()));
         }
 
         if self.timeout == 0 {
-            return Err(SoulBoxError::Config("Timeout must be greater than 0".to_string()));
+            return Err(SoulBoxError::config("Timeout must be greater than 0".to_string()));
         }
 
         match self.output_format.as_str() {
             "json" | "table" | "yaml" => {}
-            _ => return Err(SoulBoxError::Config(
+            _ => return Err(SoulBoxError::config(
                 format!("Invalid output format: {}. Must be one of: json, table, yaml", self.output_format)
             )),
         }

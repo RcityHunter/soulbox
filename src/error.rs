@@ -324,10 +324,12 @@ pub enum SoulBoxError {
 impl SoulBoxError {
     /// Create a configuration error with detailed context
     pub fn configuration(parameter: impl Into<String>, reason: impl Into<String>) -> Self {
+        let param = parameter.into();
+        let reason_str = reason.into();
         Self::Configuration {
-            message: format!("Configuration parameter '{}' invalid: {}", parameter.into(), reason.into()),
-            parameter: parameter.into(),
-            reason: reason.into(),
+            message: format!("Configuration parameter '{}' invalid: {}", param, reason_str),
+            parameter: param,
+            reason: reason_str,
         }
     }
     
@@ -355,7 +357,7 @@ impl SoulBoxError {
     }
     
     /// Create an authentication error with security tracking
-    pub fn authentication(
+    pub fn authentication_with_context(
         reason: impl Into<String>,
         user_id: Option<Uuid>,
         ip_address: Option<std::net::IpAddr>,
@@ -380,7 +382,7 @@ impl SoulBoxError {
     }
     
     /// Create an authorization error with full context
-    pub fn authorization(
+    pub fn authorization_with_context(
         resource: impl Into<String>,
         permission: impl Into<String>,
         user_id: Uuid,
@@ -405,8 +407,13 @@ impl SoulBoxError {
         }
     }
     
-    /// Create a validation error with security context
-    pub fn validation(
+    /// Create a simple validation error
+    pub fn validation(reason: impl Into<String>) -> Self {
+        Self::Validation(reason.into())
+    }
+    
+    /// Create a validation error with full context
+    pub fn validation_with_context(
         field: impl Into<String>,
         reason: impl Into<String>,
         provided_value: Option<String>,
@@ -594,16 +601,29 @@ impl SoulBoxError {
     }
 
     pub fn sandbox(msg: impl Into<String>) -> Self {
-        Self::Sandbox(msg.into())
+        Self::Sandbox {
+            message: msg.into(),
+            sandbox_id: None,
+            user_id: None,
+            operation: None,
+        }
     }
 
     pub fn authentication(msg: impl Into<String>) -> Self {
-        Self::Authentication(msg.into())
+        Self::Authentication {
+            reason: msg.into(),
+            user_id: None,
+            ip_address: None,
+            attempt_count: None,
+            security_context: SecurityContext {
+                user_id: None,
+                ip_address: None,
+                severity: SecuritySeverity::Medium,
+                timestamp: Utc::now(),
+            },
+        }
     }
 
-    pub fn authorization(msg: impl Into<String>) -> Self {
-        Self::Authorization(msg.into())
-    }
 
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::Internal(msg.into())
@@ -668,7 +688,7 @@ impl SoulBoxError {
     /// Get error code for consistent error handling across APIs
     pub fn error_code(&self) -> &'static str {
         match self {
-            SoulBoxError::Config(_) => "CONFIG_ERROR",
+            SoulBoxError::Configuration { .. } => "CONFIG_ERROR",
             SoulBoxError::Sandbox(_) => "SANDBOX_ERROR",
             SoulBoxError::Authentication(_) => "AUTH_ERROR",
             SoulBoxError::Authorization(_) => "AUTHZ_ERROR",

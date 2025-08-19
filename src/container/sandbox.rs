@@ -640,7 +640,7 @@ impl Drop for SandboxContainer {
                         Duration::from_secs(5),
                         docker.remove_container(&container_id, Some(RemoveContainerOptions {
                             force: true,
-                            v: Some(true), // Remove associated volumes
+                            v: true, // Remove associated volumes
                             ..Default::default()
                         }))
                     ).await {
@@ -715,18 +715,18 @@ impl TaskTracker {
         }
         
         let handle = tokio::spawn(future);
-        let mut tasks = self.tasks.lock().await;
+        let mut tasks = self.tasks.lock().unwrap();
         tasks.push(handle);
         
         // Clean up completed tasks periodically
-        self.cleanup_completed_tasks(&mut tasks).await;
+        self.cleanup_completed_tasks(&mut tasks);
         
         Ok(())
     }
     
     pub async fn cancel_all(&self) {
         if self.cancelled.compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed).is_ok() {
-            let mut tasks = self.tasks.lock().await;
+            let mut tasks = self.tasks.lock().unwrap();
             
             info!("Cancelling {} background tasks", tasks.len());
             
@@ -746,7 +746,7 @@ impl TaskTracker {
         }
     }
     
-    async fn cleanup_completed_tasks(&self, tasks: &mut Vec<tokio::task::JoinHandle<()>>) {
+    fn cleanup_completed_tasks(&self, tasks: &mut Vec<tokio::task::JoinHandle<()>>) {
         tasks.retain(|task| !task.is_finished());
     }
 }

@@ -167,7 +167,7 @@ async fn record_usage(
 
     // Parse metric type
     let metric_type = parse_metric_type(&request.metric_type)
-        .ok_or_else(|| SoulBoxError::Config("Invalid metric type".to_string()))?;
+        .ok_or_else(|| SoulBoxError::config("Invalid metric type".to_string()))?;
 
     state.billing_service
         .record_usage(
@@ -450,7 +450,7 @@ async fn update_invoice_status(
 
     // Parse status
     let _status = parse_invoice_status(&request.status)
-        .ok_or_else(|| SoulBoxError::Config("Invalid invoice status".to_string()))?;
+        .ok_or_else(|| SoulBoxError::config("Invalid invoice status".to_string()))?;
 
     // Placeholder implementation
     // In real implementation, you'd update the invoice status in storage
