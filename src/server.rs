@@ -10,6 +10,8 @@ use crate::auth::{api_key::ApiKeyManager, JwtManager};
 use crate::config::Config;
 use crate::database::SurrealPool;
 use crate::error::{Result as SoulBoxResult, SoulBoxError};
+use crate::validation::InputValidator;
+use tracing::{info, error, warn};
 use axum::{
     extract::State,
     http::StatusCode,
@@ -23,7 +25,6 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::info;
 
 #[derive(Clone)]
 pub struct AppState {

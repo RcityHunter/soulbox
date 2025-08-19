@@ -312,7 +312,7 @@ impl InputValidator {
             let trimmed = line.trim();
             
             // Skip comments and docstrings to reduce false positives
-            if trimmed.starts_with('#') || trimmed.starts_with('"""') || trimmed.starts_with("'''") {
+            if trimmed.starts_with('#') || trimmed.starts_with("\"\"\"") || trimmed.starts_with("'''") {
                 continue;
             }
             
@@ -322,12 +322,12 @@ impl InputValidator {
                 // Log but don't block - sandbox restrictions will handle it
             }
             
-            if trimmed.contains("subprocess") && !is_safe_subprocess_usage(trimmed) {
+            if trimmed.contains("subprocess") && !Self::is_safe_subprocess_usage(trimmed) {
                 warn!("Potentially dangerous subprocess usage at line {}: {}", line_num + 1, trimmed);
             }
             
             // Only block truly dangerous patterns that can't be safely sandboxed
-            if trimmed.contains("exec(") && !is_safe_exec_usage(trimmed) {
+            if trimmed.contains("exec(") && !Self::is_safe_exec_usage(trimmed) {
                 return Err(ValidationError::Dangerous {
                     field: "python_code".to_string(),
                     reason: format!("unsafe exec() usage at line {}", line_num + 1),
@@ -360,7 +360,7 @@ impl InputValidator {
             let trimmed = line.trim();
             
             // Skip comments to reduce false positives
-            if trimmed.starts_with('//') || trimmed.starts_with('/*') || trimmed.starts_with('*') {
+            if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with('*') {
                 continue;
             }
             

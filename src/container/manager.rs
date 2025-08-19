@@ -223,15 +223,11 @@ impl ContainerManager {
             ipc_mode: Some("none".to_string()), // Disable IPC namespace sharing
             uts_mode: Some("none".to_string()), // Disable UTS namespace sharing
             
-            // Network restrictions (will be enhanced by network configuration)
-            dns_config: Some(bollard::models::DnsConfig {
-                nameservers: Some(vec![
-                    "8.8.8.8".to_string(),
-                    "8.8.4.4".to_string(),
-                ]),
-                search: None,
-                options: None,
-            }),
+            // Network restrictions - use DNS configuration directly
+            dns: Some(vec![
+                "8.8.8.8".to_string(),
+                "8.8.4.4".to_string(),
+            ]),
             
             // Prevent privilege escalation through sysctl
             sysctls: Some({

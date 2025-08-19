@@ -205,17 +205,10 @@ pub enum SoulBoxError {
     ProcessLimitExceeded { process_count: u32, limit_count: u32 },
 
     // Security errors with threat classification
-    #[error("Authentication failed: {reason}")]
-    AuthenticationFailed { reason: String, user_id: Option<String> },
-    
-    #[error("Authorization denied: {action} on {resource}")]
-    AuthorizationDenied { action: String, resource: String, user_id: Option<String> },
     
     #[error("Malicious code detected: {threat_type} in {location}")]
     MaliciousCodeDetected { threat_type: String, location: String },
     
-    #[error("Rate limit exceeded: {requests} requests in {window_seconds}s, limit is {limit}")]
-    RateLimitExceeded { requests: u32, window_seconds: u32, limit: u32 },
     
     #[error("Input validation failed: {field} - {reason}")]
     InputValidationFailed { field: String, reason: String },
@@ -264,8 +257,6 @@ pub enum SoulBoxError {
     DeadlineExceeded { operation: String, deadline: String },
 
     // Configuration errors
-    #[error("Configuration error: {parameter} - {reason}")]
-    Configuration { parameter: String, reason: String },
     
     #[error("Environment variable missing: {variable}")]
     EnvironmentVariableMissing { variable: String },
