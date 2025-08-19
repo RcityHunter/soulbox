@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use tracing::info;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
@@ -104,7 +105,9 @@ impl Default for Config {
                 pool_size: 10,
             },
             auth: AuthConfig {
-                jwt_secret: "your-secret-key".to_string(),
+                // SECURITY: Never use default JWT secret in production
+                // This will be overridden by environment variable validation
+                jwt_secret: "MUST_BE_SET_VIA_ENVIRONMENT_VARIABLE_FOR_SECURITY".to_string(),
                 jwt_expiry_hours: 24,
                 api_key_prefix: "sb_".to_string(),
             },
@@ -204,17 +207,22 @@ impl Config {
             }
         }
 
-        // Auth configuration with validation - JWT_SECRET is REQUIRED
+        // Auth configuration with validation - JWT_SECRET is MANDATORY
         match std::env::var("JWT_SECRET") {
             Ok(secret) => {
-                if Self::validate_jwt_secret_strength(&secret) {
-                    config.auth.jwt_secret = secret;
-                } else {
-                    validation_errors.push("JWT_SECRET is too weak (minimum 64 characters required for production)".to_string());
+                // Enhanced validation with stronger requirements
+                match Self::validate_jwt_secret_strength_strict(&secret) {
+                    Ok(_) => {
+                        config.auth.jwt_secret = secret;
+                        info!("JWT_SECRET successfully validated and configured");
+                    }
+                    Err(e) => {
+                        validation_errors.push(format!("JWT_SECRET validation failed: {}", e));
+                    }
                 }
             }
             Err(_) => {
-                validation_errors.push("JWT_SECRET environment variable is REQUIRED for security".to_string());
+                validation_errors.push("CRITICAL SECURITY ERROR: JWT_SECRET environment variable is REQUIRED. Set a strong secret key of at least 64 characters.".to_string());
             }
         }
         
@@ -304,22 +312,86 @@ impl Config {
         url.starts_with("redis://") || url.starts_with("rediss://")
     }
     
-    fn validate_jwt_secret_strength(secret: &str) -> bool {
-        // 生产环境要求更严格的密钥强度
+    fn validate_jwt_secret_strength_strict(secret: &str) -> anyhow::Result<()> {
+        use tracing::{info, warn};
+        
+        // Minimum length requirement - increased for production security
         if secret.len() < 64 {
-            return false;
+            return Err(anyhow::anyhow!(
+                "JWT_SECRET must be at least 64 characters long. Current: {} characters. \
+                Use a strong, randomly generated secret key.",
+                secret.len()
+            ));
         }
         
-        // 检查不安全的默认值
-        let unsafe_secrets = [
+        // Maximum reasonable length to prevent DoS
+        if secret.len() > 512 {
+            warn!("JWT_SECRET is very long ({} characters). Consider using 64-256 character keys.", secret.len());
+        }
+        
+        // Check for weak/common secrets that should never be used
+        let forbidden_secrets = [
             "your-secret-key",
-            "your-super-secret-jwt-key-change-this-in-production",
+            "your-super-secret-jwt-key-change-this-in-production", 
             "default-secret",
             "secret",
             "jwt-secret",
+            "password",
+            "changeme",
+            "supersecret",
+            "mysecret",
+            "MUST_BE_SET_VIA_ENVIRONMENT_VARIABLE_FOR_SECURITY"
         ];
         
-        !unsafe_secrets.contains(&secret)
+        let secret_lower = secret.to_lowercase();
+        for forbidden in &forbidden_secrets {
+            if secret_lower.contains(&forbidden.to_lowercase()) {
+                return Err(anyhow::anyhow!(
+                    "JWT_SECRET contains forbidden pattern: '{}'. \
+                    Please generate a strong, random secret key.",
+                    forbidden
+                ));
+            }
+        }
+        
+        // Check for obvious patterns that indicate weak secrets
+        if secret.chars().all(|c| c == secret.chars().next().unwrap()) {
+            return Err(anyhow::anyhow!(
+                "JWT_SECRET cannot be a repeated character. Use a randomly generated key."
+            ));
+        }
+        
+        // Check for common keyboard patterns
+        let keyboard_patterns = ["123456", "qwerty", "asdf", "abcd"];
+        for pattern in &keyboard_patterns {
+            if secret_lower.contains(pattern) {
+                return Err(anyhow::anyhow!(
+                    "JWT_SECRET contains weak keyboard pattern: '{}'. \
+                    Use a cryptographically secure random key.",
+                    pattern
+                ));
+            }
+        }
+        
+        // Check entropy (basic check for character variety)
+        let unique_chars: std::collections::HashSet<char> = secret.chars().collect();
+        let entropy_ratio = unique_chars.len() as f64 / secret.len() as f64;
+        
+        if entropy_ratio < 0.5 {
+            warn!(
+                "JWT_SECRET has low character diversity (entropy ratio: {:.2}). \
+                Consider using a more random key for better security.",
+                entropy_ratio
+            );
+        }
+        
+        info!("JWT_SECRET validation passed: length={}, entropy_ratio={:.2}", secret.len(), entropy_ratio);
+        Ok(())
+    }
+
+    // Keep old method for backward compatibility but mark as deprecated
+    fn validate_jwt_secret_strength(secret: &str) -> bool {
+        Self::validate_jwt_secret_strength_strict(secret).is_ok()
     }
 
     /// Load configuration from a TOML file (soulbox.toml)
@@ -329,30 +401,23 @@ impl Config {
         Ok(config)
     }
 
-    /// Validate configuration
+    /// Validate configuration with enhanced security checks
     pub fn validate(&self) -> Result<()> {
-        // 检查多种不安全的默认值
-        let unsafe_secrets = [
-            "your-secret-key",
-            "your-super-secret-jwt-key-change-this-in-production",
-            "default-secret",
-            "secret",
-            "jwt-secret",
-        ];
-        
-        if unsafe_secrets.contains(&self.auth.jwt_secret.as_str()) {
+        // Enhanced JWT secret validation using the strict method
+        if let Err(e) = Self::validate_jwt_secret_strength_strict(&self.auth.jwt_secret) {
             anyhow::bail!(
-                "SECURITY ERROR: JWT secret must be changed from default value. \
-                Please set a secure JWT_SECRET environment variable or update the configuration file."
+                "CRITICAL SECURITY ERROR in JWT configuration: {}\n\
+                Please set a secure JWT_SECRET environment variable with at least 64 random characters.",
+                e
             );
         }
         
-        // 强制密钥长度和强度要求
-        if self.auth.jwt_secret.len() < 64 {
+        // Additional check to ensure environment variable was actually used
+        if self.auth.jwt_secret == "MUST_BE_SET_VIA_ENVIRONMENT_VARIABLE_FOR_SECURITY" {
             anyhow::bail!(
-                "SECURITY ERROR: JWT secret must be at least 64 characters long for production use. \
-                Current length: {}", 
-                self.auth.jwt_secret.len()
+                "SECURITY ERROR: JWT_SECRET environment variable was not loaded. \
+                This indicates a configuration loading issue. Please ensure JWT_SECRET is set \
+                in your environment before starting the application."
             );
         }
         

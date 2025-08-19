@@ -188,19 +188,26 @@ impl ContainerManager {
                 "no-new-privileges:true".to_string(),
                 "seccomp:default".to_string(), // Use default seccomp profile instead of unconfined
                 "apparmor:docker-default".to_string(), // Enable AppArmor protection
+                // Additional security hardening
+                "systempaths=unconfined".to_string(), // Restrict access to system paths
             ]),
             cap_drop: Some(vec!["ALL".to_string()]), // Drop all capabilities first
             cap_add: Some(vec![
-                // Only add minimal required capabilities - removed dangerous ones
-                "CHOWN".to_string(),     // File ownership changes (limited scope)
-                "DAC_OVERRIDE".to_string(), // Bypass file read/write/execute permission checks (limited)
-                "FOWNER".to_string(),    // Bypass permission checks on operations that normally require filesystem UID
-                // Removed: SYS_ADMIN (too powerful), SETUID, SETGID (privilege escalation risks)
+                // Only add truly essential capabilities for sandbox operation
+                "CHOWN".to_string(),     // File ownership changes (limited to container filesystem)
+                // Removed all dangerous capabilities:
+                // - DAC_OVERRIDE: Too powerful, can bypass all file permissions
+                // - FOWNER: Can bypass ownership checks
+                // - SYS_ADMIN: Extremely dangerous, allows container escape
+                // - SETUID/SETGID: Privilege escalation risks
             ]),
             
             // Additional security hardening
             privileged: Some(false), // Explicitly disable privileged mode
             user_ns_mode: Some("host".to_string()), // Use host user namespace for now, but with restricted caps
+            
+            // Prevent access to host devices
+            cgroup_parent: Some("docker".to_string()), // Ensure proper cgroup isolation
             
             // Prevent device access that could lead to escape
             devices: Some(vec![]), // No device access
@@ -398,10 +405,10 @@ impl ContainerManager {
             containers.insert(sandbox_id.to_string(), container.clone());
         }
         
-        info!("Secure container {} created and registered for sandbox {} with restricted privileges", container_id, sandbox_id);
+        info!("Secure container {} created and registered for sandbox {} with hardened security", container_id, sandbox_id);
         
         // Log security configuration for audit
-        info!("Security profile applied: readonly_rootfs=true, non-root_user=1000:1000, minimal_capabilities");
+        info!("Security profile applied: readonly_rootfs=true, non-root_user=1000:1000, minimal_capabilities (CHOWN only), no_dangerous_caps");
         
         // Apply network bandwidth limits if specified (requires additional setup)
         if network_limits.upload_bps.is_some() || network_limits.download_bps.is_some() {

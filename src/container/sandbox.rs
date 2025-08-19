@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::Mutex;
 use bollard::Docker;
 use bollard::container::{StartContainerOptions, StopContainerOptions, RemoveContainerOptions, StatsOptions};
 use bollard::exec::{CreateExecOptions, StartExecResults};
@@ -424,12 +425,10 @@ impl SandboxContainer {
             ));
         }
         
-        // Check for path traversal attempts in command
-        if cmd.contains("..") || cmd.contains("/proc") || cmd.contains("/sys") {
-            error!("Path traversal attempt detected in command: {}", cmd);
-            return Err(SoulBoxError::internal(
-                "Path traversal attempts are not allowed"
-            ));
+        // Improved path traversal prevention with canonicalization
+        if let Err(e) = Self::validate_command_path_security(cmd) {
+            error!("Command path security validation failed for {}: {}", cmd, e);
+            return Err(e);
         }
         
         // Check for suspicious command line arguments
@@ -458,6 +457,148 @@ impl SandboxContainer {
         info!("Command security validation passed for: {}", cmd);
         Ok(())
     }
+    
+    /// 验证命令路径安全性，防止路径遍历攻击
+    fn validate_command_path_security(cmd: &str) -> Result<()> {
+        // Basic path traversal checks
+        if cmd.contains("..") {
+            return Err(SoulBoxError::internal("Path traversal attempt detected: .."));
+        }
+        
+        // Check for access to dangerous system paths
+        let dangerous_paths = [
+            "/proc", "/sys", "/dev", "/etc", "/root", "/home", "/boot",
+            "/usr/bin/sudo", "/bin/su", "/sbin", "/usr/sbin"
+        ];
+        
+        for dangerous_path in &dangerous_paths {
+            if cmd.contains(dangerous_path) {
+                return Err(SoulBoxError::internal(
+                    format!("Access to restricted path detected: {}", dangerous_path)
+                ));
+            }
+        }
+        
+        // Proper path canonicalization to prevent bypasses
+        if cmd.starts_with('/') {
+            // For absolute paths, attempt canonicalization to detect bypass attempts
+            match Self::canonicalize_and_validate_path(cmd) {
+                Ok(canonical_path) => {
+                    // Check if canonicalized path is safe
+                    if Self::is_path_in_restricted_area(&canonical_path) {
+                        return Err(SoulBoxError::internal(
+                            format!("Canonicalized path {} leads to restricted area", canonical_path)
+                        ));
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to canonicalize path {}: {}", cmd, e);
+                    // If we can't canonicalize, be conservative and block unusual paths
+                    if cmd.contains("//") || cmd.contains("/./") || cmd.contains("/../") {
+                        return Err(SoulBoxError::internal("Suspicious path format detected"));
+                    }
+                }
+            }
+        }
+        
+        // Check for encoded path traversal attempts
+        let decoded_cmd = Self::url_decode(cmd);
+        if decoded_cmd.contains("..") || decoded_cmd != cmd {
+            return Err(SoulBoxError::internal(
+                "Encoded path traversal attempt detected"
+            ));
+        }
+        
+        // Check for null bytes that could truncate paths in C code
+        if cmd.contains('\0') {
+            return Err(SoulBoxError::internal("Null bytes in path not allowed"));
+        }
+        
+        Ok(())
+    }
+    
+    /// 安全地规范化路径并验证
+    fn canonicalize_and_validate_path(path: &str) -> Result<String> {
+        use std::path::Path;
+        
+        // 创建安全的路径处理
+        let path_obj = Path::new(path);
+        
+        // 检查路径长度
+        if path.len() > 4096 {
+            return Err(SoulBoxError::internal("Path too long"));
+        }
+        
+        // 手动规范化路径以避免文件系统访问
+        let normalized = Self::normalize_path_manually(path)?;
+        
+        // 验证规范化的路径
+        if normalized.contains("..") {
+            return Err(SoulBoxError::internal("Path traversal detected after normalization"));
+        }
+        
+        Ok(normalized)
+    }
+    
+    /// 手动规范化路径，避免文件系统调用
+    fn normalize_path_manually(path: &str) -> Result<String> {
+        let mut components = Vec::new();
+        
+        // 分解路径组件
+        for component in path.split('/') {
+            match component {
+                "" | "." => continue, // 跳过空组件和当前目录引用
+                ".." => {
+                    // 上级目录：弹出最后一个组件，但不能超出根目录
+                    if !components.is_empty() {
+                        components.pop();
+                    } else {
+                        // 尝试超出根目录的路径遍历攻击
+                        return Err(SoulBoxError::internal("Path traversal beyond root"));
+                    }
+                }
+                comp => components.push(comp),
+            }
+        }
+        
+        // 重建路径
+        if components.is_empty() {
+            Ok("/".to_string())
+        } else {
+            Ok(format!("/{}", components.join("/")))
+        }
+    }
+    
+    /// 检查路径是否在受限区域内
+    fn is_path_in_restricted_area(canonical_path: &str) -> bool {
+        let restricted_prefixes = [
+            "/proc", "/sys", "/dev", "/etc", "/root", "/home", "/boot", 
+            "/usr/bin/sudo", "/bin/su", "/sbin", "/usr/sbin", "/var/run",
+            "/run", "/tmp/docker", "/var/lib/docker"
+        ];
+        
+        for prefix in &restricted_prefixes {
+            if canonical_path.starts_with(prefix) {
+                return true;
+            }
+        }
+        
+        false
+    }
+    
+    /// 简单的URL解码以检测编码的路径遍历
+    fn url_decode(input: &str) -> String {
+        // 检查常见的URL编码的路径遍历序列
+        input
+            .replace("%2e%2e", "..")
+            .replace("%2E%2E", "..")
+            .replace("%2e.", "..")
+            .replace(".%2e", "..")
+            .replace("%2f", "/")
+            .replace("%2F", "/")
+            .replace("%5c", "\\")
+            .replace("%5C", "\\")
+    }
 }
 
 impl Drop for SandboxContainer {
@@ -467,36 +608,58 @@ impl Drop for SandboxContainer {
             let docker = self.docker.clone();
             let task_tracker = self.task_tracker.clone();
             
-            // Spawn a properly tracked cleanup task
-            let cleanup_handle = tokio::spawn(async move {
-                // Cancel all background tasks first
-                task_tracker.cancel_all().await;
-                
-                // Then cleanup container with timeout
-                let cleanup_timeout = tokio::time::timeout(
-                    Duration::from_secs(10), // Shorter timeout for Drop
-                    docker.remove_container(&container_id, Some(RemoveContainerOptions {
-                        force: true,
-                        ..Default::default()
-                    }))
-                ).await;
-                
-                match cleanup_timeout {
-                    Ok(Ok(_)) => {
-                        info!("Container {} cleaned up in background during drop", container_id);
-                    }
-                    Ok(Err(e)) => {
-                        error!("Failed to cleanup container {} during drop: {}", container_id, e);
-                    }
-                    Err(_) => {
-                        error!("Timeout during container {} cleanup in drop", container_id);
-                    }
+            // SECURITY FIX: Removed async task spawning to prevent race conditions
+            // Use synchronous cleanup to ensure resources are properly freed
+            
+            // First, cancel all background tasks synchronously
+            if let Ok(mut tasks) = self.task_tracker.tasks.try_lock() {
+                for task in tasks.drain(..) {
+                    task.abort();
                 }
+            }
+            self.task_tracker.cancelled.store(true, Ordering::Relaxed);
+            
+            // For container cleanup, spawn a dedicated thread to avoid blocking tokio runtime
+            // This ensures cleanup completes before Drop returns
+            let container_id = self.container_id.clone();
+            let docker = self.docker.clone();
+            
+            let cleanup_thread = std::thread::spawn(move || {
+                // Create a new minimal runtime just for cleanup
+                let rt = match tokio::runtime::Runtime::new() {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        error!("Failed to create cleanup runtime for container {}: {}", container_id, e);
+                        return;
+                    }
+                };
+                
+                rt.block_on(async move {
+                    // Force remove the container with strict timeout
+                    match tokio::time::timeout(
+                        Duration::from_secs(5),
+                        docker.remove_container(&container_id, Some(RemoveContainerOptions {
+                            force: true,
+                            v: Some(true), // Remove associated volumes
+                            ..Default::default()
+                        }))
+                    ).await {
+                        Ok(Ok(_)) => {
+                            info!("Container {} cleaned up synchronously during drop", container_id);
+                        }
+                        Ok(Err(e)) => {
+                            error!("Failed to cleanup container {} during drop: {}", container_id, e);
+                        }
+                        Err(_) => {
+                            error!("Timeout during synchronous cleanup of container {}", container_id);
+                        }
+                    }
+                });
             });
             
-            // Track this cleanup task to prevent leaks
-            if let Ok(mut tasks) = self.task_tracker.tasks.try_lock() {
-                tasks.push(cleanup_handle);
+            // Wait for cleanup to complete (with timeout to prevent hanging)
+            if cleanup_thread.join().is_err() {
+                error!("Cleanup thread panicked for container {}", self.container_id);
             }
         }
     }

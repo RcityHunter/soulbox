@@ -6,15 +6,12 @@ use chrono::{DateTime, Utc};
 
 pub type Result<T> = std::result::Result<T, SoulBoxError>;
 
-/// Security context for error tracking and incident response
+/// Simplified security context for error tracking
 #[derive(Debug, Clone)]
 pub struct SecurityContext {
     pub user_id: Option<Uuid>,
-    pub session_id: Option<Uuid>,
     pub ip_address: Option<std::net::IpAddr>,
-    pub request_id: Option<String>,
     pub timestamp: DateTime<Utc>,
-    pub endpoint: Option<String>,
     pub severity: SecuritySeverity,
 }
 
@@ -30,36 +27,27 @@ impl Default for SecurityContext {
     fn default() -> Self {
         Self {
             user_id: None,
-            session_id: None,
             ip_address: None,
-            request_id: None,
             timestamp: Utc::now(),
-            endpoint: None,
             severity: SecuritySeverity::Low,
         }
     }
 }
 
-/// Error metadata for enhanced debugging and monitoring
+/// Simplified error metadata for essential debugging information
 #[derive(Debug, Clone)]
 pub struct ErrorMetadata {
     pub error_id: Uuid,
-    pub context: HashMap<String, String>,
-    pub security_context: Option<SecurityContext>,
-    pub stack_trace: Option<String>,
-    pub related_errors: Vec<Uuid>,
-    pub mitigation_steps: Vec<String>,
     pub retry_after: Option<chrono::Duration>,
 }
 
 #[derive(Error, Debug)]
 pub enum SoulBoxError {
-    /// Security-related errors with enhanced tracking
+    /// Security-related errors with simplified tracking
     #[error("Security violation: {message}")]
     SecurityViolation { 
         message: String, 
         context: SecurityContext,
-        metadata: ErrorMetadata,
     },
     
     #[error("Input validation failed: {field} - {reason}")]
@@ -84,7 +72,7 @@ pub enum SoulBoxError {
         resource: String,
         current_usage: u64,
         limit: u64,
-        metadata: ErrorMetadata,
+        retry_after: Option<chrono::Duration>,
     },
     #[error("Configuration error: {message}")]
     Configuration { 
@@ -153,8 +141,7 @@ pub enum SoulBoxError {
         container_id: Option<String>,
         image: Option<String>,
         user_id: Option<Uuid>,
-        resource_limits: Option<String>,
-        metadata: ErrorMetadata,
+        retry_after: Option<chrono::Duration>,
     },
     
     #[error("Container start failed: {message}")]
@@ -353,41 +340,26 @@ impl SoulBoxError {
         }
     }
     
-    /// Create a security violation error with full context
+    /// Create a security violation error with simplified context
     pub fn security_violation(
         message: impl Into<String>, 
         severity: SecuritySeverity,
         user_id: Option<Uuid>,
-        endpoint: Option<String>,
+        ip_address: Option<std::net::IpAddr>,
     ) -> Self {
         let context = SecurityContext {
             user_id,
-            endpoint,
+            ip_address,
             severity,
             timestamp: Utc::now(),
-            ..Default::default()
         };
         
-        let metadata = ErrorMetadata {
-            error_id: Uuid::new_v4(),
-            context: HashMap::new(),
-            security_context: Some(context.clone()),
-            stack_trace: None,
-            related_errors: Vec::new(),
-            mitigation_steps: vec![
-                "Review user activity logs".to_string(),
-                "Check for similar incidents".to_string(),
-                "Consider temporary access restrictions".to_string(),
-            ],
-            retry_after: None,
-        };
-        
-        error!("Security violation detected: {} (ID: {})", message.into(), metadata.error_id);
+        let error_id = Uuid::new_v4();
+        error!("Security violation detected: {} (ID: {})", message.into(), error_id);
         
         Self::SecurityViolation {
             message: message.into(),
             context,
-            metadata,
         }
     }
     
@@ -402,7 +374,6 @@ impl SoulBoxError {
             ip_address,
             severity: SecuritySeverity::High,
             timestamp: Utc::now(),
-            ..Default::default()
         };
         
         warn!("Authentication failed: {} (User: {:?}, IP: {:?})", 
@@ -426,9 +397,9 @@ impl SoulBoxError {
     ) -> Self {
         let context = SecurityContext {
             user_id: Some(user_id),
+            ip_address: None,
             severity: SecuritySeverity::Medium,
             timestamp: Utc::now(),
-            ..Default::default()
         };
         
         warn!("Authorization denied: user {} (role: {:?}) attempted {} on {}", 
@@ -450,9 +421,10 @@ impl SoulBoxError {
         provided_value: Option<String>,
     ) -> Self {
         let context = SecurityContext {
+            user_id: None,
+            ip_address: None,
             severity: SecuritySeverity::Low,
             timestamp: Utc::now(),
-            ..Default::default()
         };
         
         Self::ValidationError {
@@ -482,85 +454,40 @@ impl SoulBoxError {
         }
     }
     
-    /// Create a resource exhaustion error
+    /// Create a resource exhaustion error - simplified
     pub fn resource_exhausted(
         resource: impl Into<String>,
         current_usage: u64,
         limit: u64,
     ) -> Self {
-        let metadata = ErrorMetadata {
-            error_id: Uuid::new_v4(),
-            context: {
-                let mut ctx = HashMap::new();
-                ctx.insert("resource".to_string(), resource.into());
-                ctx.insert("usage".to_string(), current_usage.to_string());
-                ctx.insert("limit".to_string(), limit.to_string());
-                ctx
-            },
-            security_context: None,
-            stack_trace: None,
-            related_errors: Vec::new(),
-            mitigation_steps: vec![
-                "Check resource usage patterns".to_string(),
-                "Consider scaling resources".to_string(),
-                "Review resource allocation policies".to_string(),
-            ],
-            retry_after: Some(chrono::Duration::minutes(5)),
-        };
-        
-        error!("Resource exhaustion: {} ({}/{})", resource.into(), current_usage, limit);
+        let resource_str = resource.into();
+        error!("Resource exhaustion: {} ({}/{})", resource_str, current_usage, limit);
         
         Self::ResourceExhausted {
-            resource: resource.into(),
+            resource: resource_str,
             current_usage,
             limit,
-            metadata,
+            retry_after: Some(chrono::Duration::minutes(5)),
         }
     }
     
-    /// Create an enhanced container creation error
+    /// Create a container creation error - simplified
     pub fn container_creation_failed(
         message: impl Into<String>,
         container_id: Option<String>,
         image: Option<String>,
         user_id: Option<Uuid>,
     ) -> Self {
-        let metadata = ErrorMetadata {
-            error_id: Uuid::new_v4(),
-            context: {
-                let mut ctx = HashMap::new();
-                if let Some(ref id) = container_id {
-                    ctx.insert("container_id".to_string(), id.clone());
-                }
-                if let Some(ref img) = image {
-                    ctx.insert("image".to_string(), img.clone());
-                }
-                if let Some(uid) = user_id {
-                    ctx.insert("user_id".to_string(), uid.to_string());
-                }
-                ctx
-            },
-            security_context: None,
-            stack_trace: None,
-            related_errors: Vec::new(),
-            mitigation_steps: vec![
-                "Check Docker daemon status".to_string(),
-                "Verify image availability".to_string(),
-                "Review resource constraints".to_string(),
-                "Check container registry access".to_string(),
-            ],
-            retry_after: Some(chrono::Duration::seconds(30)),
-        };
-        
-        error!("Container creation failed: {} (ID: {})", message.into(), metadata.error_id);
+        let error_id = Uuid::new_v4();
+        let message_str = message.into();
+        error!("Container creation failed: {} (ID: {})", message_str, error_id);
         
         Self::ContainerCreationFailed {
-            message: message.into(),
+            message: message_str,
             container_id,
             image,
             user_id,
-            resource_limits: None,
-            metadata,
+            retry_after: Some(chrono::Duration::seconds(30)),
         }
     }
     
@@ -608,14 +535,18 @@ impl SoulBoxError {
         matches!(self.severity(), SecuritySeverity::High | SecuritySeverity::Critical)
     }
     
-    /// Get error context for monitoring
+    /// Get error context for monitoring - simplified
     pub fn get_context(&self) -> HashMap<String, String> {
         let mut context = HashMap::new();
         
         match self {
-            Self::SecurityViolation { metadata, .. } => {
-                context.extend(metadata.context.clone());
-                context.insert("error_id".to_string(), metadata.error_id.to_string());
+            Self::SecurityViolation { context: sec_ctx, .. } => {
+                if let Some(uid) = sec_ctx.user_id {
+                    context.insert("user_id".to_string(), uid.to_string());
+                }
+                if let Some(ip) = sec_ctx.ip_address {
+                    context.insert("ip_address".to_string(), ip.to_string());
+                }
             }
             Self::Authentication { user_id, ip_address, .. } => {
                 if let Some(uid) = user_id {
@@ -630,7 +561,7 @@ impl SoulBoxError {
                 context.insert("resource".to_string(), resource.clone());
                 context.insert("permission".to_string(), permission.clone());
             }
-            Self::ContainerCreationFailed { container_id, image, user_id, metadata, .. } => {
+            Self::ContainerCreationFailed { container_id, image, user_id, .. } => {
                 if let Some(ref id) = container_id {
                     context.insert("container_id".to_string(), id.clone());
                 }
@@ -640,24 +571,28 @@ impl SoulBoxError {
                 if let Some(uid) = user_id {
                     context.insert("user_id".to_string(), uid.to_string());
                 }
-                context.insert("error_id".to_string(), metadata.error_id.to_string());
+            }
+            Self::ResourceExhausted { resource, current_usage, limit, .. } => {
+                context.insert("resource".to_string(), resource.clone());
+                context.insert("current_usage".to_string(), current_usage.to_string());
+                context.insert("limit".to_string(), limit.to_string());
             }
             _ => {}
         }
         
-        context.insert("error_type".to_string(), std::mem::discriminant(self).into());
+        context.insert("error_type".to_string(), self.error_code().to_string());
         context.insert("severity".to_string(), format!("{:?}", self.severity()));
         context.insert("timestamp".to_string(), Utc::now().to_rfc3339());
         
         context
     }
     
-    /// Get suggested retry delay
+    /// Get suggested retry delay - simplified
     pub fn retry_after(&self) -> Option<chrono::Duration> {
         match self {
             Self::RateLimitExceeded { retry_after, .. } => Some(*retry_after),
-            Self::ResourceExhausted { metadata, .. } => metadata.retry_after,
-            Self::ContainerCreationFailed { metadata, .. } => metadata.retry_after,
+            Self::ResourceExhausted { retry_after, .. } => *retry_after,
+            Self::ContainerCreationFailed { retry_after, .. } => *retry_after,
             _ => None,
         }
     }

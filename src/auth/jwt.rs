@@ -33,7 +33,7 @@ pub struct Claims {
     pub aud: String,
 }
 
-/// JWT 管理器
+/// JWT 管理器 - 简化版本
 pub struct JwtManager {
     encoding_key: EncodingKey,
     decoding_key: DecodingKey,
@@ -44,41 +44,16 @@ pub struct JwtManager {
     refresh_token_duration: Duration,
     /// Token blacklist for revoked tokens
     token_blacklist: Arc<RwLock<HashSet<String>>>,
-    /// Additional security configuration
-    security_config: SecurityConfig,
 }
 
-/// Security configuration for enhanced JWT validation
-#[derive(Debug, Clone)]
-pub struct SecurityConfig {
-    /// Maximum allowed clock skew in seconds
-    pub max_clock_skew: i64,
-    /// Minimum token lifetime in seconds
-    pub min_token_lifetime: i64,
-    /// Maximum token lifetime in seconds
-    pub max_token_lifetime: i64,
-    /// Enable strict audience validation
-    pub strict_audience_validation: bool,
-    /// Enable strict issuer validation
-    pub strict_issuer_validation: bool,
-    /// Allowed signature algorithms
-    pub allowed_algorithms: Vec<Algorithm>,
-    /// Enable token replay protection
-    pub enable_replay_protection: bool,
-}
+/// Simplified JWT configuration constants
+pub struct JwtConfig;
 
-impl Default for SecurityConfig {
-    fn default() -> Self {
-        Self {
-            max_clock_skew: 30, // 30 seconds
-            min_token_lifetime: 60, // 1 minute minimum
-            max_token_lifetime: 86400, // 24 hours maximum
-            strict_audience_validation: true,
-            strict_issuer_validation: true,
-            allowed_algorithms: vec![Algorithm::HS256, Algorithm::HS384, Algorithm::HS512],
-            enable_replay_protection: true,
-        }
-    }
+impl JwtConfig {
+    pub const MAX_CLOCK_SKEW_SECONDS: i64 = 30;
+    pub const MIN_TOKEN_LIFETIME_SECONDS: i64 = 60;
+    pub const MAX_TOKEN_LIFETIME_SECONDS: i64 = 86400; // 24 hours
+    pub const ALGORITHM: Algorithm = Algorithm::HS256; // Single secure algorithm
 }
 
 impl JwtManager {
@@ -90,23 +65,20 @@ impl JwtManager {
         let encoding_key = EncodingKey::from_secret(secret.as_bytes());
         let decoding_key = DecodingKey::from_secret(secret.as_bytes());
         
-        // 创建安全配置
-        let security_config = SecurityConfig::default();
-        
-        // 使用安全的算法配置
-        let mut validation = Validation::new(Algorithm::HS256);
+        // 使用简化的安全配置
+        let mut validation = Validation::new(JwtConfig::ALGORITHM);
         
         // 强制安全验证设置
         validation.set_issuer(&[&issuer]);
         validation.set_audience(&[&audience]);
-        validation.leeway = security_config.max_clock_skew as u64; // 严格的时钟偏差容忍度
+        validation.leeway = JwtConfig::MAX_CLOCK_SKEW_SECONDS as u64;
         validation.validate_exp = true; // 强制验证过期时间
         validation.validate_nbf = true; // 强制验证生效时间
-        validation.validate_aud = security_config.strict_audience_validation;
+        validation.validate_aud = true; // 始终启用严格的受众验证
         validation.validate_iat = true; // 验证签发时间
         
-        // 严格的算法白名单
-        validation.algorithms = security_config.allowed_algorithms.clone();
+        // 使用单一安全算法
+        validation.algorithms = vec![JwtConfig::ALGORITHM];
         
         // 禁用危险的验证绕过选项
         validation.insecure_disable_signature_validation = false;
@@ -121,7 +93,6 @@ impl JwtManager {
             access_token_duration: Duration::minutes(15), // 缩短访问令牌有效期到15分钟
             refresh_token_duration: Duration::days(1),    // 缩短刷新令牌有效期到1天
             token_blacklist: Arc::new(RwLock::new(HashSet::new())),
-            security_config,
         })
     }
     
@@ -370,35 +341,31 @@ impl JwtManager {
             return Err(SoulBoxError::authentication("Token expired").into());
         }
         
-        if claims.iat > now + self.security_config.max_clock_skew {
+        if claims.iat > now + JwtConfig::MAX_CLOCK_SKEW_SECONDS {
             error!("Token issued in future: iat={}, now={}", claims.iat, now);
             return Err(SoulBoxError::authentication("Token issued in future").into());
         }
         
-        // Validate token lifetime
+        // Validate token lifetime with simplified constants
         let token_lifetime = claims.exp - claims.iat;
-        if token_lifetime < self.security_config.min_token_lifetime {
+        if token_lifetime < JwtConfig::MIN_TOKEN_LIFETIME_SECONDS {
             return Err(SoulBoxError::authentication("Token lifetime too short").into());
         }
         
-        if token_lifetime > self.security_config.max_token_lifetime {
+        if token_lifetime > JwtConfig::MAX_TOKEN_LIFETIME_SECONDS {
             return Err(SoulBoxError::authentication("Token lifetime too long").into());
         }
         
-        // Validate issuer with strict checking
-        if self.security_config.strict_issuer_validation {
-            if !claims.iss.starts_with(&self.issuer) {
-                error!("Invalid issuer: expected prefix '{}', got '{}'", self.issuer, claims.iss);
-                return Err(SoulBoxError::authentication("Invalid token issuer").into());
-            }
+        // Simplified issuer validation - always strict
+        if !claims.iss.starts_with(&self.issuer) {
+            error!("Invalid issuer: expected prefix '{}', got '{}'", self.issuer, claims.iss);
+            return Err(SoulBoxError::authentication("Invalid token issuer").into());
         }
         
-        // Validate audience with strict checking
-        if self.security_config.strict_audience_validation {
-            if claims.aud != self.audience {
-                error!("Invalid audience: expected '{}', got '{}'", self.audience, claims.aud);
-                return Err(SoulBoxError::authentication("Invalid token audience").into());
-            }
+        // Simplified audience validation - always strict
+        if claims.aud != self.audience {
+            error!("Invalid audience: expected '{}', got '{}'", self.audience, claims.aud);
+            return Err(SoulBoxError::authentication("Invalid token audience").into());
         }
         
         // Validate user ID format
@@ -411,10 +378,8 @@ impl JwtManager {
             return Err(SoulBoxError::authentication("Invalid username format").into());
         }
         
-        // Check for potential token replay attacks (if enabled)
-        if self.security_config.enable_replay_protection {
-            self.check_replay_protection(claims, token).await?;
-        }
+        // Always perform basic replay protection
+        self.check_replay_protection(claims, token).await?;
         
         Ok(())
     }

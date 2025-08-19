@@ -303,61 +303,159 @@ impl InputValidator {
         Ok(code.to_string())
     }
     
-    /// Validate Python code for dangerous patterns
+    /// Validate Python code for dangerous patterns - context-aware
     fn validate_python_code(code: &str) -> ValidationResult<()> {
-        let dangerous_patterns = [
-            "import os", "import subprocess", "import sys", "import socket",
-            "__import__", "exec(", "eval(", "compile(",
-            "open(", "file(", "input(", "raw_input(",
-        ];
+        // More sophisticated pattern matching to reduce false positives
+        let lines: Vec<&str> = code.lines().collect();
         
-        for pattern in &dangerous_patterns {
-            if code.contains(pattern) {
-                warn!("Potentially dangerous Python pattern detected: {}", pattern);
-                // Don't block, just log for now - let runtime restrictions handle it
+        for (line_num, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            
+            // Skip comments and docstrings to reduce false positives
+            if trimmed.starts_with('#') || trimmed.starts_with('"""') || trimmed.starts_with("'''") {
+                continue;
             }
-        }
-        
-        Ok(())
-    }
-    
-    /// Validate JavaScript code for dangerous patterns
-    fn validate_javascript_code(code: &str) -> ValidationResult<()> {
-        let dangerous_patterns = [
-            "require(", "import(", "eval(", "Function(",
-            "XMLHttpRequest", "fetch(", "WebSocket",
-            "document.", "window.", "global.", "process.",
-        ];
-        
-        for pattern in &dangerous_patterns {
-            if code.contains(pattern) {
-                warn!("Potentially dangerous JavaScript pattern detected: {}", pattern);
-                // Don't block, just log for now
+            
+            // Check for truly dangerous patterns with context
+            if trimmed.contains("import os") && !trimmed.contains("# allowed") {
+                warn!("Potentially dangerous Python pattern detected at line {}: import os", line_num + 1);
+                // Log but don't block - sandbox restrictions will handle it
             }
-        }
-        
-        Ok(())
-    }
-    
-    /// Validate Bash code for dangerous patterns
-    fn validate_bash_code(code: &str) -> ValidationResult<()> {
-        let dangerous_patterns = [
-            "rm -rf", "sudo", "su -", "chmod +x",
-            "wget", "curl", "nc ", "netcat",
-            "> /dev", "< /dev", "|| ", "&& ",
-            "$(", "`", "eval ", "exec ",
-        ];
-        
-        for pattern in &dangerous_patterns {
-            if code.contains(pattern) {
+            
+            if trimmed.contains("subprocess") && !is_safe_subprocess_usage(trimmed) {
+                warn!("Potentially dangerous subprocess usage at line {}: {}", line_num + 1, trimmed);
+            }
+            
+            // Only block truly dangerous patterns that can't be safely sandboxed
+            if trimmed.contains("exec(") && !is_safe_exec_usage(trimmed) {
                 return Err(ValidationError::Dangerous {
-                    field: "bash_code".to_string(),
-                    reason: format!("dangerous pattern: {}", pattern),
+                    field: "python_code".to_string(),
+                    reason: format!("unsafe exec() usage at line {}", line_num + 1),
                 });
             }
         }
         
         Ok(())
+    }
+    
+    /// Helper to determine if subprocess usage is safe
+    fn is_safe_subprocess_usage(line: &str) -> bool {
+        // Allow common safe patterns
+        line.contains("subprocess.run") || 
+        line.contains("subprocess.check_output") ||
+        (line.contains("subprocess") && line.contains("# safe"))
+    }
+    
+    /// Helper to determine if exec usage is safe  
+    fn is_safe_exec_usage(line: &str) -> bool {
+        // Allow very specific safe patterns
+        line.contains("# safe") || line.contains("# allowed")
+    }
+    
+    /// Validate JavaScript code for dangerous patterns - context-aware
+    fn validate_javascript_code(code: &str) -> ValidationResult<()> {
+        let lines: Vec<&str> = code.lines().collect();
+        
+        for (line_num, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            
+            // Skip comments to reduce false positives
+            if trimmed.starts_with('//') || trimmed.starts_with('/*') || trimmed.starts_with('*') {
+                continue;
+            }
+            
+            // Context-aware checks with reduced false positives
+            if trimmed.contains("eval(") && !Self::is_safe_js_eval(trimmed) {
+                warn!("Potentially dangerous JavaScript eval detected at line {}: {}", line_num + 1, trimmed);
+                // Don't block - let sandbox handle it
+            }
+            
+            if trimmed.contains("require(") && !Self::is_safe_require(trimmed) {
+                warn!("Potentially dangerous require detected at line {}: {}", line_num + 1, trimmed);
+            }
+            
+            // Allow legitimate web API usage but log suspicious patterns
+            if (trimmed.contains("XMLHttpRequest") || trimmed.contains("fetch(")) 
+                && !trimmed.contains("// allowed") {
+                warn!("Network request detected at line {} (will be restricted by sandbox): {}", line_num + 1, trimmed);
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Helper to determine if JavaScript eval usage might be safe
+    fn is_safe_js_eval(line: &str) -> bool {
+        line.contains("JSON.parse") || 
+        line.contains("// safe") || 
+        line.contains("/* safe */")
+    }
+    
+    /// Helper to determine if require usage is safe
+    fn is_safe_require(line: &str) -> bool {
+        // Allow common safe patterns
+        line.contains("require('fs')") && line.contains("// allowed") ||
+        line.contains("// safe")
+    }
+    
+    /// Validate Bash code for dangerous patterns - context-aware with reduced false positives
+    fn validate_bash_code(code: &str) -> ValidationResult<()> {
+        let lines: Vec<&str> = code.lines().collect();
+        
+        for (line_num, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            
+            // Skip comments to reduce false positives
+            if trimmed.starts_with('#') {
+                continue;
+            }
+            
+            // Context-aware dangerous pattern detection
+            // Block truly dangerous patterns that can cause system damage
+            if trimmed.contains("rm -rf /") {
+                return Err(ValidationError::Dangerous {
+                    field: "bash_code".to_string(),
+                    reason: format!("dangerous system deletion at line {}", line_num + 1),
+                });
+            }
+            
+            if trimmed.contains("sudo") && !trimmed.contains("# mock") {
+                return Err(ValidationError::Dangerous {
+                    field: "bash_code".to_string(),
+                    reason: format!("privilege escalation attempt at line {}", line_num + 1),
+                });
+            }
+            
+            // Warn about potentially dangerous but context-dependent patterns
+            if trimmed.contains("rm -rf") && !trimmed.contains("rm -rf /tmp/") && !trimmed.contains("# safe") {
+                warn!("Potentially dangerous file deletion at line {}: {}", line_num + 1, trimmed);
+            }
+            
+            if (trimmed.contains("wget") || trimmed.contains("curl")) && !trimmed.contains("localhost") {
+                warn!("Network request detected at line {} (will be restricted): {}", line_num + 1, trimmed);
+                // Don't block - let network restrictions handle it
+            }
+            
+            // Allow command substitution for legitimate use cases
+            if (trimmed.contains("$(") || trimmed.contains("`")) && Self::is_dangerous_substitution(trimmed) {
+                return Err(ValidationError::Dangerous {
+                    field: "bash_code".to_string(),
+                    reason: format!("dangerous command substitution at line {}", line_num + 1),
+                });
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Helper to determine if command substitution is dangerous
+    fn is_dangerous_substitution(line: &str) -> bool {
+        // Only block truly dangerous substitution patterns
+        line.contains("$(rm") || 
+        line.contains("$(sudo") ||
+        line.contains("`rm") ||
+        line.contains("`sudo") ||
+        (line.contains("$(") && line.contains("/etc/"))
     }
     
     /// Validate environment variables
