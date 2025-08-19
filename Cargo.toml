@@ -39,9 +39,9 @@ dotenvy = "0.15"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 
 # gRPC and Protocol Buffers
-tonic = "0.10"
-tonic-build = "0.10"
-tonic-reflection = "0.10"
+tonic = "0.14"
+tonic-build = "0.14"
+tonic-reflection = "0.14"
 prost = "0.12"
 
 # WebSocket
@@ -49,7 +49,7 @@ tokio-tungstenite = "0.21"
 futures-util = "0.3"
 
 # HTTP
-axum = "0.7"
+axum = "0.8"
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 
@@ -100,7 +100,7 @@ atomic = "0.6"
 
 # Prometheus metrics
 prometheus = "0.13"
-axum-prometheus = "0.4"
+axum-prometheus = "0.9"
 
 # Regex for runtime detection
 regex = "1.10"
@@ -116,7 +116,7 @@ urlencoding = "2.1"
 rust_decimal = { version = "1.35", features = ["serde-float", "tokio-pg"] }
 
 [build-dependencies]
-tonic-build = "0.10"
+tonic-build = "0.14"
 
 [dev-dependencies]
 reqwest = { version = "0.11", features = ["json"] }

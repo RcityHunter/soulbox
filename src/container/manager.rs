@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use bollard::Docker;
-use bollard::container::{Config as ContainerConfig, CreateContainerOptions, StartContainerOptions};
+use bollard::container::{Config as ContainerConfig, CreateContainerOptions};
 use bollard::models::HostConfig;
 use tracing::{info, error};
 

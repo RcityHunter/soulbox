@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::time::Duration;
 use std::sync::Arc;
-use uuid::Uuid;
 use bollard::Docker;
 use bollard::container::{StartContainerOptions, StopContainerOptions, RemoveContainerOptions, StatsOptions};
 use bollard::exec::{CreateExecOptions, StartExecResults};

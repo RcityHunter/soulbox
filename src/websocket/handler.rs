@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, broadcast};
 use tokio::time::{interval, sleep};
 use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
-use futures_util::{StreamExt, SinkExt, stream::SplitSink, stream::SplitStream};
+use futures_util::{StreamExt, SinkExt, stream::SplitSink};
 use tracing::{info, warn, error, debug};
 use uuid::Uuid;
 

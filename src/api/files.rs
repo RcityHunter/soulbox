@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State, OriginalUri},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::Json,
     routing::{delete, get, post, put},
@@ -167,16 +167,12 @@ pub async fn delete_file(
 
 /// List directory contents
 pub async fn list_directory(
-    axum::extract::Path(sandbox_id): axum::extract::Path<String>,
-    axum::extract::OriginalUri(original_uri): axum::extract::OriginalUri,
+    State(_state): State<AppState>,
+    Path((sandbox_id, dir_path)): Path<(String, String)>,
     Query(_params): Query<ListParams>,
     _auth: AuthExtractor,
-    State(_state): State<AppState>,
 ) -> Result<Json<DirectoryListing>, (StatusCode, Json<Value>)> {
-    // Extract dir_path from the original URI
-    let uri_path = original_uri.path();
-    let _dir_path = uri_path.split("/directories/").nth(1)
-        .unwrap_or("");
+    let _dir_path = dir_path;
     
     // Validate sandbox_id is a valid UUID
     let _sandbox_uuid = Uuid::parse_str(&sandbox_id)
@@ -215,15 +211,10 @@ pub async fn create_directory(
 
 /// Get file metadata
 pub async fn get_file_metadata(
-    axum::extract::Path(sandbox_id): axum::extract::Path<String>,
-    axum::extract::OriginalUri(original_uri): axum::extract::OriginalUri,
-    _auth: AuthExtractor,
     State(_state): State<AppState>,
+    Path((sandbox_id, file_path)): Path<(String, String)>,
+    _auth: AuthExtractor,
 ) -> Result<Json<FileMetadata>, (StatusCode, Json<Value>)> {
-    // Extract file_path from the original URI
-    let uri_path = original_uri.path();
-    let file_path = uri_path.split("/metadata/").nth(1)
-        .unwrap_or("");
     
     // Validate sandbox_id is a valid UUID
     let _sandbox_uuid = Uuid::parse_str(&sandbox_id)

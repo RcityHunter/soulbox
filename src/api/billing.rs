@@ -116,8 +116,8 @@ pub fn create_billing_routes() -> Router<BillingApiState> {
 
 /// Get usage summary for the authenticated user
 async fn get_usage_summary(
-    Query(params): Query<UsageQuery>,
     State(state): State<BillingApiState>,
+    Query(params): Query<UsageQuery>,
     auth: AuthContext,
 ) -> Result<Json<UsageSummaryResponse>> {
     let user_id = auth.user_id;
@@ -159,9 +159,9 @@ async fn get_usage_summary(
 
 /// Record a usage metric
 async fn record_usage(
-    auth: AuthContext,
     State(state): State<BillingApiState>,
     Json(request): Json<RecordUsageRequest>,
+    auth: AuthContext,
 ) -> Result<StatusCode> {
     let user_id = auth.user_id;
 
@@ -189,9 +189,9 @@ async fn record_usage(
 
 /// Get real-time usage for the authenticated user
 async fn get_realtime_usage(
-    auth: AuthContext,
-    Query(_params): Query<UsageQuery>,
     State(state): State<BillingApiState>,
+    Query(_params): Query<UsageQuery>,
+    auth: AuthContext,
 ) -> Result<Json<Vec<RealtimeUsageResponse>>> {
     let user_id = auth.user_id;
 
@@ -230,8 +230,8 @@ async fn get_realtime_usage(
 
 /// Server-sent events stream for real-time usage updates
 async fn realtime_usage_stream(
-    auth: AuthContext,
     State(state): State<BillingApiState>,
+    auth: AuthContext,
 ) -> Sse<impl tokio_stream::Stream<Item = std::result::Result<Event, Infallible>>> {
     let user_id = auth.user_id;
     let billing_service = state.billing_service.clone();
@@ -265,9 +265,9 @@ async fn realtime_usage_stream(
 
 /// Get usage for a specific session
 async fn get_session_usage(
-    auth: AuthContext,
-    Path(session_id): Path<Uuid>,
     State(state): State<BillingApiState>,
+    Path(session_id): Path<Uuid>,
+    auth: AuthContext,
 ) -> Result<Json<Vec<UsageMetric>>> {
     let _user_id = auth.user_id; // For authorization check
 
@@ -284,9 +284,9 @@ async fn get_session_usage(
 
 /// Get billing records for the authenticated user
 async fn get_billing_records(
-    auth: AuthContext,
-    Query(params): Query<UsageQuery>,
     State(state): State<BillingApiState>,
+    Query(params): Query<UsageQuery>,
+    auth: AuthContext,
 ) -> Result<Json<Vec<BillingRecordResponse>>> {
     let user_id = auth.user_id;
 
@@ -313,9 +313,9 @@ async fn get_billing_records(
 
 /// Get a specific billing record
 async fn get_billing_record(
-    auth: AuthContext,
-    Path(_record_id): Path<Uuid>,
     State(state): State<BillingApiState>,
+    Path(_record_id): Path<Uuid>,
+    auth: AuthContext,
 ) -> Result<Json<BillingRecordResponse>> {
     let _user_id = auth.user_id; // For authorization
 
@@ -340,9 +340,9 @@ pub struct CostEstimateResponse {
 }
 
 async fn estimate_cost(
-    auth: AuthContext,
     State(state): State<BillingApiState>,
     Json(request): Json<CostEstimateRequest>,
+    auth: AuthContext,
 ) -> Result<Json<CostEstimateResponse>> {
     let _user_id = auth.user_id;
 
@@ -385,9 +385,9 @@ async fn estimate_cost(
 
 /// Get invoices for the authenticated user
 async fn get_user_invoices(
-    auth: AuthContext,
-    Query(params): Query<UsageQuery>,
     State(state): State<BillingApiState>,
+    Query(params): Query<UsageQuery>,
+    auth: AuthContext,
 ) -> Result<Json<Vec<InvoiceResponse>>> {
     let _user_id = auth.user_id;
 
@@ -407,9 +407,9 @@ async fn get_user_invoices(
 
 /// Get a specific invoice
 async fn get_invoice(
-    auth: AuthContext,
-    Path(invoice_id): Path<Uuid>,
     State(state): State<BillingApiState>,
+    Path(invoice_id): Path<Uuid>,
+    auth: AuthContext,
 ) -> Result<Json<InvoiceResponse>> {
     let _user_id = auth.user_id;
 
@@ -424,10 +424,10 @@ pub struct UpdateInvoiceStatusRequest {
 }
 
 async fn update_invoice_status(
-    auth: AuthContext,
-    Path(invoice_id): Path<Uuid>,
     State(state): State<BillingApiState>,
+    Path(invoice_id): Path<Uuid>,
     Json(request): Json<UpdateInvoiceStatusRequest>,
+    auth: AuthContext,
 ) -> Result<StatusCode> {
     let _user_id = auth.user_id;
 
@@ -443,8 +443,8 @@ async fn update_invoice_status(
 
 /// Real-time metrics stream for dashboard
 async fn realtime_metrics_stream(
-    auth: AuthContext,
     State(state): State<BillingApiState>,
+    auth: AuthContext,
 ) -> Sse<impl tokio_stream::Stream<Item = std::result::Result<Event, Infallible>>> {
     let _user_id = auth.user_id;
     let billing_service = state.billing_service.clone();

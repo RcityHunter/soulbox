@@ -2,7 +2,6 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{RwLock, Semaphore};
-use uuid::Uuid;
 use tracing::{info, warn, error, debug};
 
 use crate::error::{Result, SoulBoxError};

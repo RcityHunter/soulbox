@@ -314,7 +314,6 @@ impl AuthMiddleware {
 /// 认证提取器 - 用于处理函数中提取认证信息
 pub struct AuthExtractor(pub AuthContext);
 
-#[axum::async_trait]
 impl<S> axum::extract::FromRequestParts<S> for AuthExtractor
 where
     S: Send + Sync,
@@ -338,7 +337,6 @@ where
 /// 可选认证提取器 - 认证信息可能不存在
 pub struct OptionalAuthExtractor(pub Option<AuthContext>);
 
-#[axum::async_trait]
 impl<S> axum::extract::FromRequestParts<S> for OptionalAuthExtractor
 where
     S: Send + Sync,
