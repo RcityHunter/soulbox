@@ -131,8 +131,37 @@ impl Server {
         
         let listener = TcpListener::bind(&addr).await?;
         
-        axum::serve(listener, self.app).await?;
+        // Set up graceful shutdown
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         
+        // Handle shutdown signals
+        tokio::spawn(async move {
+            let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("Failed to create SIGTERM handler");
+            let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                .expect("Failed to create SIGINT handler");
+                
+            tokio::select! {
+                _ = sigterm.recv() => info!("Received SIGTERM, initiating graceful shutdown"),
+                _ = sigint.recv() => info!("Received SIGINT, initiating graceful shutdown"),
+            }
+            
+            let _ = shutdown_tx.send(());
+        });
+        
+        // Run server with graceful shutdown
+        let server = axum::serve(listener, self.app)
+            .with_graceful_shutdown(async {
+                shutdown_rx.await.ok();
+                info!("Shutdown signal received, stopping server...");
+            });
+            
+        if let Err(e) = server.await {
+            error!("Server error: {}", e);
+            return Err(e.into());
+        }
+        
+        info!("Server shutdown completed gracefully");
         Ok(())
     }
 }
@@ -298,15 +327,14 @@ async fn get_sandbox(
     info!("User {} getting sandbox: {}", auth.0.username, id);
     
     // Validate sandbox ID format
-    if !id.chars().all(|c| c.is_alphanumeric() || c == '_') {
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    let validated_id = InputValidator::validate_sandbox_id(&id)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
     
     // In a full implementation, would check database/container manager for sandbox
     // For now, return mock data based on sandbox ID pattern
-    if id.starts_with("sb_") {
+    if validated_id.starts_with("sb_") {
         Ok(Json(json!({
-            "id": id,
+            "id": validated_id,
             "status": "running",
             "template": "python:3.11",
             "memory_mb": 512,
@@ -330,9 +358,8 @@ async fn delete_sandbox(
     info!("User {} deleting sandbox: {}", auth.0.username, id);
     
     // Validate sandbox ID format
-    if !id.chars().all(|c| c.is_alphanumeric() || c == '_') {
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    let validated_id = InputValidator::validate_sandbox_id(&id)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
     
     // In a full implementation, would:
     // 1. Check if sandbox exists and user has permission
@@ -340,9 +367,9 @@ async fn delete_sandbox(
     // 3. Clean up resources
     // 4. Update database
     
-    if id.starts_with("sb_") {
+    if validated_id.starts_with("sb_") {
         Ok(Json(json!({
-            "id": id,
+            "id": validated_id,
             "status": "deleted",
             "deleted_by": auth.0.user_id,
             "deleted_at": chrono::Utc::now().to_rfc3339()
@@ -361,9 +388,8 @@ async fn execute_in_sandbox(
     info!("User {} executing code in sandbox: {}", auth.0.username, id);
     
     // Validate sandbox ID format
-    if !id.chars().all(|c| c.is_alphanumeric() || c == '_') {
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    let validated_id = InputValidator::validate_sandbox_id(&id)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
     
     // Extract code execution parameters
     let code = payload.get("code")

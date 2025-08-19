@@ -21,7 +21,9 @@ pub struct SandboxContainer {
     /// Docker client for container operations
     docker: Arc<Docker>,
     /// Track if container has been cleaned up
-    cleaned_up: Arc<std::sync::atomic::AtomicBool>,
+    cleaned_up: Arc<AtomicBool>,
+    /// Task tracker for managing background tasks
+    task_tracker: Arc<TaskTracker>,
 }
 
 impl SandboxContainer {
@@ -43,7 +45,8 @@ impl SandboxContainer {
             network_config,
             env_vars,
             docker,
-            cleaned_up: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            cleaned_up: Arc::new(AtomicBool::new(false)),
+            task_tracker: Arc::new(TaskTracker::new()),
         })
     }
 
@@ -135,6 +138,9 @@ impl SandboxContainer {
             return Err(SoulBoxError::internal("Empty command"));
         }
         
+        // Security validation: check for dangerous commands
+        self.validate_command_security(&command)?;
+        
         let start_time = std::time::Instant::now();
         info!("Executing command in container {}: {:?}", self.container_id, command);
         
@@ -143,6 +149,20 @@ impl SandboxContainer {
             attach_stdout: Some(true),
             attach_stderr: Some(true),
             cmd: Some(command.clone()),
+            
+            // Security: Execute as non-root user
+            user: Some("1000:1000".to_string()),
+            
+            // Security: Set working directory
+            working_dir: Some("/workspace".to_string()),
+            
+            // Security: Limit environment
+            env: Some(vec![
+                "PATH=/usr/local/bin:/usr/bin:/bin".to_string(),
+                "HOME=/workspace".to_string(),
+                "USER=soulbox".to_string(),
+            ]),
+            
             ..Default::default()
         };
         
@@ -188,6 +208,16 @@ impl SandboxContainer {
         let execution_time = start_time.elapsed();
         
         info!("Command execution completed. Exit code: {}, Duration: {:?}", exit_code, execution_time);
+        
+        // Log execution for security audit
+        info!("Command executed: {:?}, exit_code: {}, duration: {:?}s", 
+              command.first().unwrap_or(&"unknown".to_string()), 
+              exit_code, 
+              execution_time.as_secs());
+              
+        if exit_code != 0 {
+            warn!("Command failed with exit code {}: {:?}", exit_code, command);
+        }
         
         Ok(ExecutionResult {
             stdout,
@@ -310,20 +340,31 @@ impl SandboxContainer {
 
     /// Manually cleanup container resources
     pub async fn cleanup(&self) -> Result<()> {
-        use std::sync::atomic::Ordering;
-        
         if self.cleaned_up.compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed).is_ok() {
-            // Only cleanup if not already cleaned up
-            match self.docker.remove_container(&self.container_id, Some(RemoveContainerOptions {
-                force: true,
-                ..Default::default()
-            })).await {
-                Ok(_) => {
+            info!("Starting cleanup for container {}", self.container_id);
+            
+            // First, cancel all background tasks
+            self.task_tracker.cancel_all().await;
+            
+            // Then cleanup the container with timeout
+            let cleanup_result = tokio::time::timeout(
+                Duration::from_secs(30),
+                self.docker.remove_container(&self.container_id, Some(RemoveContainerOptions {
+                    force: true,
+                    ..Default::default()
+                }))
+            ).await;
+            
+            match cleanup_result {
+                Ok(Ok(_)) => {
                     info!("Container {} cleaned up successfully", self.container_id);
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     error!("Failed to cleanup container {}: {}", self.container_id, e);
                     // Don't propagate error to avoid panic in Drop
+                }
+                Err(_) => {
+                    error!("Timeout during container {} cleanup", self.container_id);
                 }
             }
         }
@@ -332,32 +373,131 @@ impl SandboxContainer {
 
     /// Check if container has been cleaned up
     pub fn is_cleaned_up(&self) -> bool {
-        self.cleaned_up.load(std::sync::atomic::Ordering::Relaxed)
+        self.cleaned_up.load(Ordering::Relaxed)
+    }
+    
+    /// Get task tracker statistics
+    pub async fn get_task_stats(&self) -> TaskStats {
+        self.task_tracker.get_stats().await
+    }
+    
+    /// Validate command for security issues
+    fn validate_command_security(&self, command: &[String]) -> Result<()> {
+        if command.is_empty() {
+            return Err(SoulBoxError::internal("Empty command"));
+        }
+        
+        let cmd = &command[0];
+        
+        // Block dangerous commands that could lead to container escape
+        let blocked_commands = [
+            // System commands
+            "sudo", "su", "doas",
+            // Container/system inspection
+            "docker", "podman", "runc", "ctr", "crictl",
+            // Kernel/system access
+            "insmod", "rmmod", "modprobe", "kmod",
+            "mount", "umount", "swapon", "swapoff",
+            // Network configuration
+            "iptables", "ip6tables", "nftables", "tc",
+            "ifconfig", "ip", "route",
+            // Process/system control
+            "systemctl", "service", "init", "systemd",
+            "reboot", "shutdown", "halt", "poweroff",
+            // Debugging/tracing (could be used for escape)
+            "strace", "ptrace", "gdb", "lldb",
+            "perf", "dtrace", "ftrace",
+            // Filesystem manipulation that could escape chroot
+            "chroot", "pivot_root",
+            // Device access
+            "mknod", "mkfifo",
+            // Dangerous shells or interpreters with too much power
+            "bash", "zsh", "fish", "csh", "tcsh", "ksh",
+        ];
+        
+        // Check if the base command (without path) is blocked
+        let base_cmd = cmd.split('/').last().unwrap_or(cmd);
+        if blocked_commands.contains(&base_cmd) {
+            error!("Blocked dangerous command execution attempt: {}", cmd);
+            return Err(SoulBoxError::internal(
+                format!("Command '{}' is not allowed for security reasons", cmd)
+            ));
+        }
+        
+        // Check for path traversal attempts in command
+        if cmd.contains("..") || cmd.contains("/proc") || cmd.contains("/sys") {
+            error!("Path traversal attempt detected in command: {}", cmd);
+            return Err(SoulBoxError::internal(
+                "Path traversal attempts are not allowed"
+            ));
+        }
+        
+        // Check for suspicious command line arguments
+        for arg in command {
+            if arg.len() > 4096 {
+                return Err(SoulBoxError::internal(
+                    "Command argument too long (potential buffer overflow)"
+                ));
+            }
+            
+            if arg.contains("\x00") {
+                return Err(SoulBoxError::internal(
+                    "Null bytes in command arguments are not allowed"
+                ));
+            }
+        }
+        
+        // Validate total command length
+        let total_length: usize = command.iter().map(|s| s.len()).sum();
+        if total_length > 65536 { // 64KB limit
+            return Err(SoulBoxError::internal(
+                "Total command length exceeds security limits"
+            ));
+        }
+        
+        info!("Command security validation passed for: {}", cmd);
+        Ok(())
     }
 }
 
 impl Drop for SandboxContainer {
     fn drop(&mut self) {
-        use std::sync::atomic::Ordering;
-        
         if self.cleaned_up.compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed).is_ok() {
             let container_id = self.container_id.clone();
             let docker = self.docker.clone();
+            let task_tracker = self.task_tracker.clone();
             
-            // 在后台线程中清理资源，避免阻塞Drop
-            tokio::spawn(async move {
-                match docker.remove_container(&container_id, Some(RemoveContainerOptions {
-                    force: true,
-                    ..Default::default()
-                })).await {
-                    Ok(_) => {
+            // Spawn a properly tracked cleanup task
+            let cleanup_handle = tokio::spawn(async move {
+                // Cancel all background tasks first
+                task_tracker.cancel_all().await;
+                
+                // Then cleanup container with timeout
+                let cleanup_timeout = tokio::time::timeout(
+                    Duration::from_secs(10), // Shorter timeout for Drop
+                    docker.remove_container(&container_id, Some(RemoveContainerOptions {
+                        force: true,
+                        ..Default::default()
+                    }))
+                ).await;
+                
+                match cleanup_timeout {
+                    Ok(Ok(_)) => {
                         info!("Container {} cleaned up in background during drop", container_id);
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         error!("Failed to cleanup container {} during drop: {}", container_id, e);
+                    }
+                    Err(_) => {
+                        error!("Timeout during container {} cleanup in drop", container_id);
                     }
                 }
             });
+            
+            // Track this cleanup task to prevent leaks
+            if let Ok(mut tasks) = self.task_tracker.tasks.try_lock() {
+                tasks.push(cleanup_handle);
+            }
         }
     }
 }
@@ -378,4 +518,87 @@ pub struct ResourceStats {
     pub cpu_cores: f64,
     pub network_rx_bytes: u64,
     pub network_tx_bytes: u64,
+}
+
+/// Task tracker for managing background tasks and preventing leaks
+#[derive(Debug)]
+pub struct TaskTracker {
+    tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    cancelled: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskStats {
+    pub active_tasks: usize,
+    pub cancelled: bool,
+}
+
+impl TaskTracker {
+    pub fn new() -> Self {
+        Self {
+            tasks: Arc::new(Mutex::new(Vec::new())),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+    
+    pub async fn spawn<F>(&self, future: F) -> Result<()>
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        if self.cancelled.load(Ordering::Relaxed) {
+            return Err(crate::error::SoulBoxError::internal(
+                "TaskTracker has been cancelled"
+            ));
+        }
+        
+        let handle = tokio::spawn(future);
+        let mut tasks = self.tasks.lock().await;
+        tasks.push(handle);
+        
+        // Clean up completed tasks periodically
+        self.cleanup_completed_tasks(&mut tasks).await;
+        
+        Ok(())
+    }
+    
+    pub async fn cancel_all(&self) {
+        if self.cancelled.compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed).is_ok() {
+            let mut tasks = self.tasks.lock().await;
+            
+            info!("Cancelling {} background tasks", tasks.len());
+            
+            for task in tasks.drain(..) {
+                task.abort();
+            }
+            
+            info!("All background tasks cancelled");
+        }
+    }
+    
+    pub async fn get_stats(&self) -> TaskStats {
+        let tasks = self.tasks.lock().await;
+        TaskStats {
+            active_tasks: tasks.len(),
+            cancelled: self.cancelled.load(Ordering::Relaxed),
+        }
+    }
+    
+    async fn cleanup_completed_tasks(&self, tasks: &mut Vec<tokio::task::JoinHandle<()>>) {
+        tasks.retain(|task| !task.is_finished());
+    }
+}
+
+impl Drop for TaskTracker {
+    fn drop(&mut self) {
+        if !self.cancelled.load(Ordering::Relaxed) {
+            self.cancelled.store(true, Ordering::Relaxed);
+            
+            // Try to cancel all tasks (best effort)
+            if let Ok(mut tasks) = self.tasks.try_lock() {
+                for task in tasks.drain(..) {
+                    task.abort();
+                }
+            }
+        }
+    }
 }

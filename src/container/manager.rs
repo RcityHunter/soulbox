@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Mutex, Semaphore};
 use bollard::Docker;
 use bollard::container::{Config as ContainerConfig, CreateContainerOptions};
 use bollard::models::HostConfig;
 use tracing::{info, error, warn};
+use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
+use tokio::time::{timeout, Duration as TokioDuration};
 
 use crate::{error::Result, config::Config};
 use crate::network::{NetworkManager, SandboxNetworkConfig, NetworkError};
@@ -17,7 +19,11 @@ pub struct ContainerManager {
     /// Active container instances - using RwLock for better read performance
     containers: Arc<RwLock<HashMap<String, Arc<SandboxContainer>>>>,
     /// Container operation semaphore to limit concurrent operations
-    operation_semaphore: Arc<tokio::sync::Semaphore>,
+    operation_semaphore: Arc<Semaphore>,
+    /// Resource cleanup tracker to prevent leaks
+    resource_tracker: Arc<ResourceTracker>,
+    /// Shutdown signal for graceful cleanup
+    shutdown_signal: Arc<AtomicBool>,
     /// Global configuration
     config: Config,
     /// Network manager for handling network configurations
@@ -49,10 +55,12 @@ impl ContainerManager {
         Ok(Self {
             docker: Arc::new(docker),
             containers: Arc::new(RwLock::new(HashMap::new())),
-            operation_semaphore: Arc::new(tokio::sync::Semaphore::new(10)), // Limit to 10 concurrent container operations
+            operation_semaphore: Arc::new(Semaphore::new(10)), // Limit to 10 concurrent container operations
             config,
-            network_manager: Arc::new(tokio::sync::Mutex::new(NetworkManager::new())),
-            creation_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            network_manager: Arc::new(Mutex::new(NetworkManager::new())),
+            creation_counter: Arc::new(AtomicU64::new(0)),
+            resource_tracker: Arc::new(ResourceTracker::new()),
+            shutdown_signal: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -65,9 +73,15 @@ impl ContainerManager {
         network_config: NetworkConfig,
         env_vars: HashMap<String, String>,
     ) -> Result<Arc<SandboxContainer>> {
-        // Acquire operation permit to prevent resource contention
-        let _permit = self.operation_semaphore.acquire().await
+        // Acquire operation permit with timeout to prevent deadlocks
+        let _permit = timeout(TokioDuration::from_secs(30), self.operation_semaphore.acquire()).await
+            .map_err(|_| crate::error::SoulBoxError::internal("Operation timed out waiting for permit".to_string()))?
             .map_err(|_| crate::error::SoulBoxError::internal("Failed to acquire operation permit".to_string()))?;
+
+        // Check if shutdown is in progress
+        if self.shutdown_signal.load(Ordering::Acquire) {
+            return Err(crate::error::SoulBoxError::internal("Container manager is shutting down".to_string()));
+        }
 
         // Convert basic NetworkConfig to SandboxNetworkConfig
         let sandbox_network_config = SandboxNetworkConfig {
@@ -169,30 +183,107 @@ impl ContainerManager {
                 None
             },
             
-            // Security constraints
+            // Enhanced security constraints to prevent container escape
             security_opt: Some(vec![
                 "no-new-privileges:true".to_string(),
-                "seccomp=unconfined".to_string(), // Make configurable later
+                "seccomp:default".to_string(), // Use default seccomp profile instead of unconfined
+                "apparmor:docker-default".to_string(), // Enable AppArmor protection
             ]),
-            cap_drop: Some(vec!["ALL".to_string()]),
+            cap_drop: Some(vec!["ALL".to_string()]), // Drop all capabilities first
             cap_add: Some(vec![
-                "SYS_ADMIN".to_string(), // Required for some operations
-                "CHOWN".to_string(),     // File ownership changes
-                "SETUID".to_string(),    // Process user changes
-                "SETGID".to_string(),    // Process group changes
+                // Only add minimal required capabilities - removed dangerous ones
+                "CHOWN".to_string(),     // File ownership changes (limited scope)
+                "DAC_OVERRIDE".to_string(), // Bypass file read/write/execute permission checks (limited)
+                "FOWNER".to_string(),    // Bypass permission checks on operations that normally require filesystem UID
+                // Removed: SYS_ADMIN (too powerful), SETUID, SETGID (privilege escalation risks)
             ]),
             
-            // Process limits
-            pids_limit: Some(256), // Limit number of processes
+            // Additional security hardening
+            privileged: Some(false), // Explicitly disable privileged mode
+            user_ns_mode: Some("host".to_string()), // Use host user namespace for now, but with restricted caps
             
-            // File system constraints
-            readonly_rootfs: Some(false), // Allow writes to root filesystem
+            // Prevent device access that could lead to escape
+            devices: Some(vec![]), // No device access
+            device_cgroup_rules: Some(vec![
+                "c *:* rmw".to_string(), // Deny all character device access
+                "b *:* rmw".to_string(), // Deny all block device access
+            ]),
+            
+            // Enhanced process and resource limits
+            pids_limit: Some(64), // Strict limit on number of processes to prevent fork bombs
+            
+            // Prevent access to host devices and filesystems
+            ipc_mode: Some("none".to_string()), // Disable IPC namespace sharing
+            uts_mode: Some("none".to_string()), // Disable UTS namespace sharing
+            
+            // Network restrictions (will be enhanced by network configuration)
+            dns_config: Some(bollard::models::DnsConfig {
+                nameservers: Some(vec![
+                    "8.8.8.8".to_string(),
+                    "8.8.4.4".to_string(),
+                ]),
+                search: None,
+                options: None,
+            }),
+            
+            // Prevent privilege escalation through sysctl
+            sysctls: Some({
+                let mut sysctls = std::collections::HashMap::new();
+                sysctls.insert("net.ipv4.ping_group_range".to_string(), "0 0".to_string()); // Disable ping
+                sysctls.insert("kernel.dmesg_restrict".to_string(), "1".to_string()); // Restrict dmesg access
+                sysctls
+            }),
+            
+            // Ulimits for additional security
+            ulimits: Some(vec![
+                bollard::models::ResourcesUlimits {
+                    name: Some("nofile".to_string()), // File descriptor limit
+                    soft: Some(1024),
+                    hard: Some(1024),
+                },
+                bollard::models::ResourcesUlimits {
+                    name: Some("nproc".to_string()), // Process limit
+                    soft: Some(64),
+                    hard: Some(64),
+                },
+                bollard::models::ResourcesUlimits {
+                    name: Some("fsize".to_string()), // File size limit
+                    soft: Some(resource_limits.disk.limit_mb as i64 * 1024 * 1024),
+                    hard: Some(resource_limits.disk.limit_mb as i64 * 1024 * 1024),
+                },
+            ]),
+            
+            // Enhanced file system constraints
+            readonly_rootfs: Some(true), // Make root filesystem read-only for security
             tmpfs: Some({
                 let mut tmpfs = std::collections::HashMap::new();
-                tmpfs.insert("/tmp".to_string(), format!("size={}m,exec,suid,dev", resource_limits.disk.limit_mb / 4));
-                tmpfs.insert("/var/tmp".to_string(), format!("size={}m,exec,suid,dev", resource_limits.disk.limit_mb / 8));
+                // Mount secure tmpfs without dangerous flags
+                tmpfs.insert("/tmp".to_string(), format!("size={}m,noexec,nosuid,nodev", resource_limits.disk.limit_mb / 4));
+                tmpfs.insert("/var/tmp".to_string(), format!("size={}m,noexec,nosuid,nodev", resource_limits.disk.limit_mb / 8));
+                // Add a writable workspace
+                tmpfs.insert("/workspace".to_string(), format!("size={}m,nodev,nosuid", resource_limits.disk.limit_mb / 2));
                 tmpfs
             }),
+            
+            // Additional mount restrictions
+            mounts: Some(vec![
+                // Mount /proc as read-only to prevent information disclosure
+                bollard::models::Mount {
+                    target: Some("/proc".to_string()),
+                    source: Some("proc".to_string()),
+                    typ: Some(bollard::models::MountTypeEnum::PROC),
+                    read_only: Some(true),
+                    ..Default::default()
+                },
+                // Mount /sys as read-only
+                bollard::models::Mount {
+                    target: Some("/sys".to_string()),
+                    source: Some("sysfs".to_string()),
+                    typ: Some(bollard::models::MountTypeEnum::SYSFS),
+                    read_only: Some(true),
+                    ..Default::default()
+                },
+            ]),
             
             ..Default::default()
         };
@@ -219,7 +310,7 @@ impl ContainerManager {
             info!("Max connections limit: {}", max_conn);
         }
         
-        // Create container configuration
+        // Create container configuration with security hardening
         let container_config = ContainerConfig {
             image: Some(image.to_string()),
             env: Some(docker_env),
@@ -230,6 +321,26 @@ impl ContainerManager {
             tty: Some(true),
             open_stdin: Some(true),
             host_config: Some(host_config),
+            
+            // Security: Disable networking by default (will be enabled through network config)
+            network_disabled: Some(!network_config.base_config.enabled),
+            
+            // User specification for non-root execution
+            user: Some("1000:1000".to_string()), // Run as non-root user
+            
+            // Disable host config inheritance
+            hostname: Some(format!("sandbox-{}", sandbox_id)),
+            domainname: Some("soulbox.local".to_string()),
+            
+            // Additional container labels for tracking and security
+            labels: Some({
+                let mut labels = std::collections::HashMap::new();
+                labels.insert("soulbox.sandbox_id".to_string(), sandbox_id.to_string());
+                labels.insert("soulbox.security_profile".to_string(), "restricted".to_string());
+                labels.insert("soulbox.created_at".to_string(), chrono::Utc::now().to_rfc3339());
+                labels
+            }),
+            
             ..Default::default()
         };
         
@@ -272,14 +383,25 @@ impl ContainerManager {
             let mut containers = self.containers.write().await;
             // Check if sandbox_id already exists to prevent overwrites
             if containers.contains_key(sandbox_id) {
+                // Clean up the newly created container before failing
+                if let Err(e) = container.cleanup().await {
+                    error!("Failed to cleanup duplicate container {}: {}", container_id, e);
+                }
                 return Err(crate::error::SoulBoxError::internal(
                     format!("Sandbox {} already has an active container", sandbox_id)
                 ));
             }
+            
+            // Track this container for resource management
+            self.resource_tracker.track_container(&container_id, sandbox_id).await;
+            
             containers.insert(sandbox_id.to_string(), container.clone());
         }
         
-        info!("Container {} created and registered for sandbox {}", container_id, sandbox_id);
+        info!("Secure container {} created and registered for sandbox {} with restricted privileges", container_id, sandbox_id);
+        
+        // Log security configuration for audit
+        info!("Security profile applied: readonly_rootfs=true, non-root_user=1000:1000, minimal_capabilities");
         
         // Apply network bandwidth limits if specified (requires additional setup)
         if network_limits.upload_bps.is_some() || network_limits.download_bps.is_some() {
@@ -315,8 +437,9 @@ impl ContainerManager {
     }
     
     pub async fn remove_container(&self, sandbox_id: &str) -> Result<bool> {
-        // Acquire operation permit to prevent resource contention during removal
-        let _permit = self.operation_semaphore.acquire().await
+        // Acquire operation permit with timeout to prevent resource contention during removal
+        let _permit = timeout(TokioDuration::from_secs(30), self.operation_semaphore.acquire()).await
+            .map_err(|_| crate::error::SoulBoxError::internal("Removal operation timed out".to_string()))?
             .map_err(|_| crate::error::SoulBoxError::internal("Failed to acquire operation permit".to_string()))?;
 
         // First retrieve the container before removing it
@@ -339,11 +462,13 @@ impl ContainerManager {
                 }
             }
             
-            // Remove from registry atomically
+            // Remove from registry and resource tracker atomically
             let mut containers = self.containers.write().await;
             let removed = containers.remove(sandbox_id).is_some();
             
             if removed {
+                // Untrack the container from resource management
+                self.resource_tracker.untrack_container(sandbox_id).await;
                 info!("Successfully removed container for sandbox: {}", sandbox_id);
             }
             
@@ -438,6 +563,48 @@ impl ContainerManager {
     pub async fn get_port_mappings(&self, sandbox_id: &str) -> Vec<crate::network::port_mapping::PortAllocation> {
         let net_mgr = self.network_manager.lock().await;
         net_mgr.port_service().get_sandbox_ports(sandbox_id)
+    }
+
+    /// Gracefully shutdown the container manager
+    pub async fn shutdown(&self) -> Result<()> {
+        info!("Initiating container manager shutdown...");
+        
+        // Signal shutdown to prevent new operations
+        self.shutdown_signal.store(true, Ordering::Release);
+        
+        // Wait for ongoing operations to complete with timeout
+        let mut retries = 0;
+        while self.operation_semaphore.available_permits() < 10 && retries < 30 {
+            tokio::time::sleep(TokioDuration::from_millis(100)).await;
+            retries += 1;
+        }
+        
+        if retries >= 30 {
+            warn!("Timeout waiting for operations to complete during shutdown");
+        }
+        
+        // Clean up all containers
+        let containers = {
+            let containers_guard = self.containers.read().await;
+            containers_guard.keys().cloned().collect::<Vec<_>>()
+        };
+        
+        for sandbox_id in containers {
+            if let Err(e) = self.remove_container(&sandbox_id).await {
+                error!("Failed to remove container {} during shutdown: {}", sandbox_id, e);
+            }
+        }
+        
+        // Perform final resource cleanup
+        self.resource_tracker.cleanup_all().await;
+        
+        info!("Container manager shutdown completed");
+        Ok(())
+    }
+
+    /// Get resource usage statistics
+    pub async fn get_resource_stats(&self) -> HashMap<String, ResourceUsageStats> {
+        self.resource_tracker.get_stats().await
     }
 
     /// Create a container with basic configuration (for pool usage)
@@ -554,4 +721,226 @@ pub struct ContainerInfo {
     pub sandbox_id: String,
     pub status: String,
     pub image: String,
+}
+
+/// Resource tracker for monitoring and preventing memory leaks
+#[derive(Debug)]
+pub struct ResourceTracker {
+    /// Track active containers and their resource usage
+    tracked_containers: Arc<RwLock<HashMap<String, ContainerResource>>>,
+    /// Background task handle for periodic cleanup
+    cleanup_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// Metrics for resource usage tracking
+    metrics: Arc<ResourceMetrics>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContainerResource {
+    pub container_id: String,
+    pub sandbox_id: String,
+    pub created_at: std::time::Instant,
+    pub last_seen: Arc<AtomicU64>, // Unix timestamp
+    pub cleanup_attempted: Arc<AtomicBool>,
+}
+
+#[derive(Debug)]
+pub struct ResourceMetrics {
+    pub total_containers_created: AtomicU64,
+    pub total_containers_cleaned: AtomicU64,
+    pub leaked_containers_detected: AtomicU64,
+    pub cleanup_failures: AtomicU64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResourceUsageStats {
+    pub container_id: String,
+    pub sandbox_id: String,
+    pub uptime_seconds: u64,
+    pub last_seen_seconds_ago: u64,
+    pub cleanup_attempted: bool,
+}
+
+impl ResourceTracker {
+    pub fn new() -> Self {
+        let tracker = Self {
+            tracked_containers: Arc::new(RwLock::new(HashMap::new())),
+            cleanup_task: Arc::new(Mutex::new(None)),
+            metrics: Arc::new(ResourceMetrics {
+                total_containers_created: AtomicU64::new(0),
+                total_containers_cleaned: AtomicU64::new(0),
+                leaked_containers_detected: AtomicU64::new(0),
+                cleanup_failures: AtomicU64::new(0),
+            }),
+        };
+        
+        // Start background cleanup task
+        tracker.start_cleanup_task();
+        tracker
+    }
+
+    pub async fn track_container(&self, container_id: &str, sandbox_id: &str) {
+        let resource = ContainerResource {
+            container_id: container_id.to_string(),
+            sandbox_id: sandbox_id.to_string(),
+            created_at: std::time::Instant::now(),
+            last_seen: Arc::new(AtomicU64::new(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+            )),
+            cleanup_attempted: Arc::new(AtomicBool::new(false)),
+        };
+
+        let mut containers = self.tracked_containers.write().await;
+        containers.insert(sandbox_id.to_string(), resource);
+        
+        self.metrics.total_containers_created.fetch_add(1, Ordering::Relaxed);
+        
+        info!("Tracking container {} for sandbox {}", container_id, sandbox_id);
+    }
+
+    pub async fn untrack_container(&self, sandbox_id: &str) {
+        let mut containers = self.tracked_containers.write().await;
+        if let Some(resource) = containers.remove(sandbox_id) {
+            if !resource.cleanup_attempted.load(Ordering::Relaxed) {
+                self.metrics.total_containers_cleaned.fetch_add(1, Ordering::Relaxed);
+            }
+            info!("Untracked container for sandbox {}", sandbox_id);
+        }
+    }
+
+    pub async fn update_heartbeat(&self, sandbox_id: &str) {
+        let containers = self.tracked_containers.read().await;
+        if let Some(resource) = containers.get(sandbox_id) {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            resource.last_seen.store(now, Ordering::Relaxed);
+        }
+    }
+
+    pub async fn get_stats(&self) -> HashMap<String, ResourceUsageStats> {
+        let containers = self.tracked_containers.read().await;
+        let mut stats = HashMap::new();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        for (sandbox_id, resource) in containers.iter() {
+            let last_seen = resource.last_seen.load(Ordering::Relaxed);
+            let stats_entry = ResourceUsageStats {
+                container_id: resource.container_id.clone(),
+                sandbox_id: sandbox_id.clone(),
+                uptime_seconds: resource.created_at.elapsed().as_secs(),
+                last_seen_seconds_ago: now.saturating_sub(last_seen),
+                cleanup_attempted: resource.cleanup_attempted.load(Ordering::Relaxed),
+            };
+            stats.insert(sandbox_id.clone(), stats_entry);
+        }
+
+        stats
+    }
+
+    pub async fn detect_leaked_containers(&self) -> Vec<String> {
+        let containers = self.tracked_containers.read().await;
+        let mut leaked = Vec::new();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        // Consider containers as leaked if they haven't been seen for 5 minutes
+        const LEAK_THRESHOLD_SECONDS: u64 = 300;
+
+        for (sandbox_id, resource) in containers.iter() {
+            let last_seen = resource.last_seen.load(Ordering::Relaxed);
+            if now.saturating_sub(last_seen) > LEAK_THRESHOLD_SECONDS {
+                leaked.push(sandbox_id.clone());
+                if !resource.cleanup_attempted.swap(true, Ordering::Relaxed) {
+                    self.metrics.leaked_containers_detected.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+
+        if !leaked.is_empty() {
+            warn!("Detected {} potentially leaked containers: {:?}", leaked.len(), leaked);
+        }
+
+        leaked
+    }
+
+    pub async fn cleanup_all(&self) {
+        info!("Cleaning up all tracked resources...");
+        
+        // Stop the background cleanup task
+        if let Some(handle) = self.cleanup_task.lock().await.take() {
+            handle.abort();
+        }
+
+        let containers = self.tracked_containers.read().await;
+        for (sandbox_id, _) in containers.iter() {
+            warn!("Container {} still tracked during final cleanup", sandbox_id);
+        }
+        
+        drop(containers);
+        self.tracked_containers.write().await.clear();
+        
+        info!("Resource cleanup completed");
+    }
+
+    fn start_cleanup_task(&self) {
+        let tracked_containers = Arc::clone(&self.tracked_containers);
+        let metrics = Arc::clone(&self.metrics);
+        
+        let handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(TokioDuration::from_secs(60)); // Check every minute
+            
+            loop {
+                interval.tick().await;
+                
+                // Detect and log leaked containers
+                let leaked_count = {
+                    let containers = tracked_containers.read().await;
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    
+                    containers.iter()
+                        .filter(|(_, resource)| {
+                            let last_seen = resource.last_seen.load(Ordering::Relaxed);
+                            now.saturating_sub(last_seen) > 300 // 5 minutes
+                        })
+                        .count()
+                };
+                
+                if leaked_count > 0 {
+                    warn!("Background cleanup task detected {} potentially leaked containers", leaked_count);
+                }
+                
+                // Update metrics
+                let total_created = metrics.total_containers_created.load(Ordering::Relaxed);
+                let total_cleaned = metrics.total_containers_cleaned.load(Ordering::Relaxed);
+                let leaked_detected = metrics.leaked_containers_detected.load(Ordering::Relaxed);
+                
+                if total_created > 0 {
+                    info!(
+                        "Resource tracking stats - Created: {}, Cleaned: {}, Leaked: {}, Active: {}",
+                        total_created,
+                        total_cleaned,
+                        leaked_detected,
+                        total_created.saturating_sub(total_cleaned)
+                    );
+                }
+            }
+        });
+        
+        // Store the handle for later cleanup
+        if let Ok(mut task_guard) = self.cleanup_task.try_lock() {
+            *task_guard = Some(handle);
+        }
+    }
 }

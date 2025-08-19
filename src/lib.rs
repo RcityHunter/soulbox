@@ -23,6 +23,7 @@ pub mod snapshot;
 pub mod optimization;
 pub mod recovery;
 pub mod billing;
+pub mod validation;
 
 // Simple implementation - Linus style
 pub mod simple;

@@ -11,6 +11,7 @@ use super::{JwtManager, Claims};
 use super::models::{User, Permission, Role};
 use crate::audit::{AuditService, AuditMiddleware, AuditEventType};
 use crate::error::SoulBoxError;
+use crate::validation::InputValidator;
 
 /// 认证提取器 - 从请求中提取用户信息
 #[derive(Debug, Clone)]
@@ -83,7 +84,21 @@ impl AuthMiddleware {
 
         let token = match auth_header {
             Some(header) if header.starts_with("Bearer ") => {
-                &header[7..] // 移除 "Bearer " 前缀
+                let token_part = &header[7..]; // 移除 "Bearer " 前缀
+                
+                // Basic token format validation
+                if token_part.is_empty() || token_part.len() > 4096 {
+                    warn!("Invalid token format: length={}", token_part.len());
+                    return Err(StatusCode::UNAUTHORIZED);
+                }
+                
+                // Check for dangerous characters
+                if token_part.contains('\0') || token_part.contains('\n') || token_part.contains('\r') {
+                    warn!("Token contains invalid characters");
+                    return Err(StatusCode::UNAUTHORIZED);
+                }
+                
+                token_part
             }
             _ => {
                 warn!("Missing or invalid Authorization header");
@@ -92,7 +107,7 @@ impl AuthMiddleware {
         };
 
         // 验证 JWT 令牌
-        let claims = match auth_middleware.jwt_manager.validate_access_token(token) {
+        let claims = match auth_middleware.jwt_manager.validate_access_token(token).await {
             Ok(claims) => {
                 // 记录成功的认证事件
                 if let Some(ref audit_middleware) = auth_middleware.audit_middleware {
