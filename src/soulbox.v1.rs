@@ -1,6 +1,10 @@
 // Mock protobuf definitions for development
 // TODO: Replace with actual generated code once tonic-build 0.14 is properly configured
 
+//! This module contains mock protobuf definitions that provide the same interface
+//! as the generated code would, allowing the rest of the system to compile and work
+//! during development phase.
+
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, Default)]

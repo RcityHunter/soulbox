@@ -10,7 +10,7 @@ use base64::Engine;
 
 use crate::container::{ResourceLimits as ContainerResourceLimits, NetworkConfig as ContainerNetworkConfig};
 use crate::container::resource_limits::{MemoryLimits, CpuLimits, DiskLimits, NetworkLimits};
-use crate::sandbox::SandboxRuntime;
+use crate::container::sandbox::SandboxContainer;
 
 // Import generated protobuf types
 // Note: The generated code will be in src/soulbox.v1.rs after build

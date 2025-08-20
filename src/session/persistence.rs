@@ -1,5 +1,5 @@
 use redis::{AsyncCommands, Client, RedisError};
-use redis::aio::ConnectionManager;
+use redis::aio::MultiplexedConnection;
 use serde_json;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -33,7 +33,7 @@ impl Default for RedisSessionConfig {
 
 /// Redis-backed session manager with automatic expiration
 pub struct RedisSessionManager {
-    connection: ConnectionManager,
+    connection: MultiplexedConnection,
     config: RedisSessionConfig,
 }
 
@@ -43,7 +43,7 @@ impl RedisSessionManager {
         let client = Client::open(config.url.clone())
             .map_err(|e| SoulBoxError::SessionError(format!("Failed to create Redis client: {}", e)))?;
         
-        let connection = ConnectionManager::new(client).await
+        let connection = client.get_multiplexed_async_connection().await
             .map_err(|e| SoulBoxError::SessionError(format!("Failed to connect to Redis: {}", e)))?;
         
         info!("Connected to Redis at {}", config.url);
@@ -197,7 +197,7 @@ impl SessionManager for RedisSessionManager {
         if let Ok(Some(session)) = self.get_session(session_id).await {
             // Remove from user sessions set
             let user_sessions_key = self.user_sessions_key(&session.user_id);
-            let _: Result<i64, RedisError> = conn.srem(&user_sessions_key, session_id.to_string()).await;
+            let _: std::result::Result<i64, _> = conn.srem(&user_sessions_key, session_id.to_string()).await;
             
             // Remove container mapping if exists
             if let Some(container_id) = &session.container_id {
@@ -208,7 +208,7 @@ impl SessionManager for RedisSessionManager {
         
         // Delete session data
         let session_key = self.session_key(session_id);
-        conn.del(&session_key).await
+        conn.del::<_, ()>(&session_key).await
             .map_err(|e| SoulBoxError::SessionError(format!("Failed to delete session: {}", e)))?;
         
         info!("Deleted session {}", session_id);
@@ -324,7 +324,7 @@ impl SessionManager for RedisSessionManager {
 // Helper methods for RedisSessionManager
 impl RedisSessionManager {
     /// Clean up session-related references
-    async fn cleanup_session_references(&self, session_key: &str, conn: &mut ConnectionManager) -> Result<()> {
+    async fn cleanup_session_references(&self, session_key: &str, conn: &mut MultiplexedConnection) -> Result<()> {
         // Extract session ID from key
         if let Some(session_id_part) = session_key.split(':').last() {
             if let Ok(session_id) = uuid::Uuid::parse_str(session_id_part) {
@@ -401,7 +401,7 @@ mod tests {
         // Try to connect to Redis, skip test if not available
         match Client::open("redis://localhost:6379") {
             Ok(client) => {
-                match ConnectionManager::new(client).await {
+                match client.get_multiplexed_async_connection().await {
                     Ok(connection) => {
                         Some(RedisSessionManager {
                             connection,

@@ -70,7 +70,7 @@ impl ContainerManager {
         sandbox_id: &str,
         image: &str,
         resource_limits: ResourceLimits,
-        network_config: NetworkConfig,
+        container_network_config: NetworkConfig,
         env_vars: HashMap<String, String>,
     ) -> Result<Arc<SandboxContainer>> {
         // Acquire operation permit with timeout to prevent deadlocks
@@ -83,9 +83,23 @@ impl ContainerManager {
             return Err(crate::error::SoulBoxError::internal("Container manager is shutting down".to_string()));
         }
 
-        // Convert basic NetworkConfig to SandboxNetworkConfig
+        // Convert container NetworkConfig to SandboxNetworkConfig
         let sandbox_network_config = SandboxNetworkConfig {
-            base_config: network_config,
+            base_config: crate::network::NetworkConfig {
+                bridge: None,
+                dns_servers: container_network_config.dns_servers.iter()
+                    .filter_map(|s| s.parse().ok())
+                    .collect(),
+                subnet: None,
+                gateway: None,
+                port_mappings: container_network_config.port_mappings.iter()
+                    .filter_map(|p| p.host_port.map(|host| crate::network::PortMapping {
+                        host_port: host,
+                        container_port: p.container_port,
+                        protocol: p.protocol.clone(),
+                    }))
+                    .collect(),
+            },
             ..Default::default()
         };
         
@@ -150,17 +164,10 @@ impl ContainerManager {
                     let mut bindings = std::collections::HashMap::new();
                     for port_mapping in &network_config.base_config.port_mappings {
                         let container_port = format!("{}/{}", port_mapping.container_port, port_mapping.protocol);
-                        let host_binding = if let Some(host_port) = port_mapping.host_port {
-                            vec![bollard::models::PortBinding {
-                                host_ip: Some("127.0.0.1".to_string()),
-                                host_port: Some(host_port.to_string()),
-                            }]
-                        } else {
-                            vec![bollard::models::PortBinding {
-                                host_ip: Some("127.0.0.1".to_string()),
-                                host_port: None, // Docker will allocate
-                            }]
-                        };
+                        let host_binding = vec![bollard::models::PortBinding {
+                            host_ip: Some("127.0.0.1".to_string()),
+                            host_port: Some(port_mapping.host_port.to_string()),
+                        }];
                         bindings.insert(container_port, Some(host_binding));
                     }
                     bindings
@@ -178,7 +185,9 @@ impl ContainerManager {
             
             // DNS configuration
             dns: if !network_config.base_config.dns_servers.is_empty() {
-                Some(network_config.base_config.dns_servers.clone())
+                Some(network_config.base_config.dns_servers.iter()
+                     .map(|ip| ip.to_string())
+                     .collect())
             } else {
                 None
             },
@@ -350,13 +359,29 @@ impl ContainerManager {
         // Clone resource_limits before moving it to avoid borrow after move
         let network_limits = resource_limits.network.clone();
         
+        // Convert back to container NetworkConfig for SandboxContainer::new
+        let container_net_config = crate::container::network::NetworkConfig {
+            enable_internet: true,
+            port_mappings: network_config.base_config.port_mappings.iter()
+                .map(|p| crate::container::network::PortMapping {
+                    host_port: Some(p.host_port),
+                    container_port: p.container_port,
+                    protocol: p.protocol.clone(),
+                })
+                .collect(),
+            allowed_domains: Vec::new(),
+            dns_servers: network_config.base_config.dns_servers.iter()
+                .map(|ip| ip.to_string())
+                .collect(),
+        };
+
         // Create SandboxContainer instance with real Docker integration
         let container = Arc::new(SandboxContainer::new(
             sandbox_id,
             &container_id,
             image,
             resource_limits,
-            network_config.base_config,
+            container_net_config,
             env_vars,
             Arc::clone(&self.docker),
         )?);
