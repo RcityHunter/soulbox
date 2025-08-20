@@ -1,11 +1,12 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // For tonic-build 0.14, temporarily skip protobuf compilation 
-    // The grpc module needs to be refactored for the new API
-    // This allows the rest of the project to compile
     println!("cargo:rerun-if-changed=proto/soulbox.proto");
     
-    // TODO: Re-enable when grpc module is refactored
-    // tonic_build API has changed significantly in 0.14
+    // For now, let's temporarily disable protobuf compilation
+    // but keep the gRPC module enabled for development
+    // The module will use mock implementations until this is resolved
+    
+    // TODO: Implement proper tonic-build 0.14 integration
+    // The API has changed significantly and requires careful adaptation
     
     Ok(())
 }

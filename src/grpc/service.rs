@@ -13,8 +13,9 @@ use crate::container::resource_limits::{MemoryLimits, CpuLimits, DiskLimits, Net
 use crate::sandbox::SandboxRuntime;
 
 // Import generated protobuf types
-mod soulbox_proto {
-    tonic::include_proto!("soulbox.v1");
+// Note: The generated code will be in src/soulbox.v1.rs after build
+pub mod soulbox_proto {
+    pub use crate::soulbox_v1::*;
 }
 
 pub use soulbox_proto::*;

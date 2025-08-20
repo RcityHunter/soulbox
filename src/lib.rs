@@ -1,6 +1,6 @@
 pub mod config;
 pub mod error;
-// pub mod grpc; // Temporarily disabled until tonic-build 0.14 API is fixed
+// pub mod grpc; // Re-enable once full tonic-build 0.14 integration is complete
 pub mod websocket;
 pub mod container;
 pub mod firecracker;
@@ -48,6 +48,6 @@ pub use recovery::{RecoveryManager, RecoveryConfig, RecoveryStrategy, RecoveryRe
 pub use billing::{BillingService, BillingConfig, MetricsCollector, UsageAggregator, CostCalculator, BillingStorage};
 
 // Include generated protobuf code
-// pub mod proto {
-//     tonic::include_proto!("soulbox.v1");
-// } // Temporarily disabled until tonic-build 0.14 API is fixed
+// pub mod soulbox_v1 {
+//     include!("soulbox.v1.rs");
+// } // Re-enable once full tonic-build 0.14 integration is complete

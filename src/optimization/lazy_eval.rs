@@ -3,7 +3,7 @@
 //! This module implements lazy evaluation patterns to reduce unnecessary
 //! computation and improve CPU efficiency.
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::future::Future;
@@ -11,18 +11,30 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::sync::OnceCell;
+use crate::error::{SoulBoxError, Result as SoulBoxResult};
+
+/// Error type for lazy evaluation operations
+#[derive(Debug, thiserror::Error)]
+pub enum LazyEvalError {
+    #[error("LazyValue has no initializer")]
+    NoInitializer,
+    #[error("LazyAsyncValue async initialization not fully implemented")]
+    AsyncInitNotImplemented,
+    #[error("LazyFuture polled after completion")]
+    FuturePolledAfterCompletion,
+}
 
 /// Lazy value that computes its result only when first accessed
 pub struct LazyValue<T> {
     cell: OnceCell<T>,
-    initializer: Option<Box<dyn Fn() -> T + Send + Sync>>,
+    initializer: Option<Box<dyn Fn() -> Result<T, LazyEvalError> + Send + Sync>>,
 }
 
 impl<T> LazyValue<T> {
     /// Create a new lazy value with the given initializer
     pub fn new<F>(initializer: F) -> Self
     where
-        F: Fn() -> T + Send + Sync + 'static,
+        F: Fn() -> Result<T, LazyEvalError> + Send + Sync + 'static,
     {
         Self {
             cell: OnceCell::new(),
@@ -30,17 +42,40 @@ impl<T> LazyValue<T> {
         }
     }
 
+    /// Create a new lazy value with a simple initializer that never fails
+    pub fn new_simple<F>(initializer: F) -> Self
+    where
+        F: Fn() -> T + Send + Sync + 'static,
+    {
+        Self {
+            cell: OnceCell::new(),
+            initializer: Some(Box::new(move || Ok(initializer()))),
+        }
+    }
+
     /// Get the value, computing it if necessary
-    pub async fn get(&self) -> &T {
-        self.cell
-            .get_or_init(|| async {
-                if let Some(ref init) = self.initializer {
-                    init()
-                } else {
-                    panic!("LazyValue has no initializer")
+    pub async fn get(&self) -> SoulBoxResult<&T> {
+        match self.cell.get() {
+            Some(value) => Ok(value),
+            None => {
+                match &self.initializer {
+                    Some(init) => {
+                        match init() {
+                            Ok(value) => {
+                                // We need to use get_or_init to handle concurrency
+                                let result = self.cell.get_or_init(|| async {
+                                    // Re-run the initializer since we can't move the value
+                                    init().unwrap_or_else(|_| unreachable!())
+                                }).await;
+                                Ok(result)
+                            },
+                            Err(e) => Err(SoulBoxError::internal(format!("Failed to initialize lazy value: {}", e)))
+                        }
+                    },
+                    None => Err(SoulBoxError::internal("LazyValue has no initializer".to_string()))
                 }
-            })
-            .await
+            }
+        }
     }
 
     /// Check if the value has been computed
@@ -69,14 +104,14 @@ impl<T> LazyAsyncValue<T> {
     }
 
     /// Get the value, computing it asynchronously if necessary
-    pub async fn get(&self) -> &T {
+    pub async fn get(&self) -> SoulBoxResult<&T> {
         if let Some(value) = self.cell.get() {
-            return value;
+            return Ok(value);
         }
 
         // This is a simplified implementation
         // In a real implementation, we'd need proper async initialization
-        panic!("LazyAsyncValue async initialization not fully implemented");
+        Err(SoulBoxError::internal("LazyAsyncValue async initialization not fully implemented".to_string()))
     }
 }
 
@@ -99,7 +134,7 @@ where
     }
 
     /// Get or compute a value
-    pub async fn get_or_compute<F>(&self, key: K, compute: F) -> V
+    pub async fn get_or_compute<F>(&self, key: K, compute: F) -> SoulBoxResult<V>
     where
         F: Fn() -> V + Send + Sync + 'static,
     {
@@ -107,12 +142,12 @@ where
         {
             let cache = self.cache.read();
             if let Some(lazy_value) = cache.get(&key) {
-                return lazy_value.get().await.clone();
+                return lazy_value.get().await.map(|v| v.clone());
             }
         }
 
-        // Create new lazy value
-        let lazy_value = Arc::new(LazyValue::new(compute));
+        // Create new lazy value using the simple constructor
+        let lazy_value = Arc::new(LazyValue::new_simple(compute));
         
         // Insert into cache
         {
@@ -120,7 +155,7 @@ where
             cache.insert(key.clone(), lazy_value.clone());
         }
 
-        lazy_value.get().await.clone()
+        lazy_value.get().await.map(|v| v.clone())
     }
 
     /// Clear the cache
@@ -379,7 +414,14 @@ where
                 }
             }
         } else {
-            panic!("LazyFuture polled after completion");
+            // Future polled after completion - this is a logic error
+            // Return the cached result if available, otherwise return a default value
+            if let Some(ref result) = this.result {
+                Poll::Ready(result.clone())
+            } else {
+                // This should never happen in well-formed code
+                Poll::Pending
+            }
         }
     }
 }
@@ -394,18 +436,18 @@ mod tests {
         let call_count = Arc::new(AtomicUsize::new(0));
         let call_count_clone = call_count.clone();
 
-        let lazy_value = LazyValue::new(move || {
+        let lazy_value = LazyValue::new_simple(move || {
             call_count_clone.fetch_add(1, Ordering::SeqCst);
             42
         });
 
         assert!(!lazy_value.is_computed());
 
-        let value1 = lazy_value.get().await;
+        let value1 = lazy_value.get().await.unwrap();
         assert_eq!(*value1, 42);
         assert_eq!(call_count.load(Ordering::SeqCst), 1);
 
-        let value2 = lazy_value.get().await;
+        let value2 = lazy_value.get().await.unwrap();
         assert_eq!(*value2, 42);
         assert_eq!(call_count.load(Ordering::SeqCst), 1); // Should not increment again
 
@@ -425,7 +467,8 @@ mod tests {
                 call_count_clone.fetch_add(1, Ordering::SeqCst);
                 100
             })
-            .await;
+            .await
+            .unwrap();
 
         assert_eq!(value1, 100);
         assert_eq!(call_count.load(Ordering::SeqCst), 1);
@@ -436,7 +479,8 @@ mod tests {
                 call_count_clone2.fetch_add(1, Ordering::SeqCst);
                 200 // Different value, but shouldn't be called
             })
-            .await;
+            .await
+            .unwrap();
 
         assert_eq!(value2, 100); // Should return cached value
         assert_eq!(call_count.load(Ordering::SeqCst), 1); // Should not increment

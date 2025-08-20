@@ -927,3 +927,50 @@ impl ResourceTracker {
         }
     }
 }
+
+/// Mock implementation of ContainerManager for testing
+#[cfg(test)]
+pub struct MockContainerManager {
+    containers: HashMap<String, Arc<SandboxContainer>>,
+}
+
+#[cfg(test)]
+impl MockContainerManager {
+    pub fn new() -> Self {
+        Self {
+            containers: HashMap::new(),
+        }
+    }
+
+    pub async fn create_sandbox_container(
+        &mut self,
+        sandbox_id: &str,
+        _image: &str,
+        _resource_limits: ResourceLimits,
+        _network_config: SandboxNetworkConfig,
+        _env_vars: HashMap<String, String>,
+    ) -> Result<Arc<SandboxContainer>> {
+        // Create a mock container for testing
+        let container = Arc::new(SandboxContainer::new(
+            sandbox_id.to_string(),
+            "mock_container_id".to_string(),
+            "mock_image".to_string(),
+        ));
+        
+        self.containers.insert(sandbox_id.to_string(), container.clone());
+        Ok(container)
+    }
+
+    pub async fn stop_container(&mut self, sandbox_id: &str) -> Result<()> {
+        self.containers.remove(sandbox_id);
+        Ok(())
+    }
+
+    pub async fn get_container(&self, sandbox_id: &str) -> Option<Arc<SandboxContainer>> {
+        self.containers.get(sandbox_id).cloned()
+    }
+
+    pub async fn list_containers(&self) -> Vec<Arc<SandboxContainer>> {
+        self.containers.values().cloned().collect()
+    }
+}

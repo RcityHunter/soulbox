@@ -513,7 +513,7 @@ mod tests {
         let pool = SurrealPool::new(config).await.unwrap();
         let conn = pool.get_connection().await.unwrap();
         
-        let result: Result<Vec<surrealdb::Value>, _> = conn.query("SELECT 1 as test").await;
+        let result: Result<Vec<surrealdb::sql::Value>, _> = conn.query("SELECT 1 as test").await;
         assert!(result.is_ok());
     }
 }

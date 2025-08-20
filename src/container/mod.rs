@@ -6,6 +6,8 @@ pub mod network;
 pub mod pool;
 
 pub use manager::ContainerManager;
+#[cfg(test)]
+pub use manager::MockContainerManager;
 pub use sandbox::SandboxContainer;
 pub use resource_limits::ResourceLimits;
 pub use network::{NetworkConfig, PortMapping};

@@ -106,6 +106,28 @@ pub enum SoulBoxError {
         role: Option<String>,
         security_context: SecurityContext,
     },
+
+    #[error("Unauthorized: {message}")]
+    Unauthorized {
+        message: String,
+        user_id: Option<Uuid>,
+        security_context: Option<SecurityContext>,
+    },
+
+    #[error("Forbidden: {message}")]
+    Forbidden {
+        message: String,
+        resource: Option<String>,
+        user_id: Option<Uuid>,
+        security_context: Option<SecurityContext>,
+    },
+
+    #[error("Not found: {message}")]
+    NotFound {
+        message: String,
+        resource_type: Option<String>,
+        resource_id: Option<String>,
+    },
     
     #[error("Feature not implemented: {feature}")]
     NotImplemented { 
@@ -780,7 +802,7 @@ impl axum::response::IntoResponse for SoulBoxError {
             SoulBoxError::RateLimitExceeded { .. } => StatusCode::TOO_MANY_REQUESTS,
             SoulBoxError::ResourceExhausted { .. } => StatusCode::TOO_MANY_REQUESTS,
             SoulBoxError::SecurityViolation { .. } => StatusCode::FORBIDDEN,
-            SoulBoxError::Config(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            SoulBoxError::ConfigurationValidationFailed { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
@@ -788,11 +810,11 @@ impl axum::response::IntoResponse for SoulBoxError {
             SoulBoxError::NotFound { message, .. } => message.clone(),
             SoulBoxError::Unauthorized { message, .. } => message.clone(),
             SoulBoxError::Forbidden { message, .. } => message.clone(),
-            SoulBoxError::ValidationError { message, .. } => message.clone(),
-            SoulBoxError::RateLimitExceeded { message, .. } => message.clone(),
-            SoulBoxError::ResourceExhausted { message, .. } => message.clone(),
+            SoulBoxError::ValidationError { field, reason, .. } => format!("Validation failed for {}: {}", field, reason),
+            SoulBoxError::RateLimitExceeded { resource, limit, window, .. } => format!("Rate limit exceeded for {}: {} requests per {}", resource, limit, window),
+            SoulBoxError::ResourceExhausted { resource, current, limit, .. } => format!("Resource exhausted {}: {}/{}", resource, current, limit),
             SoulBoxError::SecurityViolation { message, .. } => message.clone(),
-            SoulBoxError::Config(msg) => msg.clone(),
+            SoulBoxError::ConfigurationValidationFailed { section, errors } => format!("{}: {}", section, errors.join(", ")),
             _ => "Internal server error".to_string(),
         };
 
