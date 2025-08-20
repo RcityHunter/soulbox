@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::time::Duration;
 use tokio::time::timeout;
 
-// Import from our crate - these will initially fail to compile
+// Import from our crate
 use soulbox::container::{
-    ContainerManager, SandboxContainer, ResourceLimits, CpuLimits, MemoryLimits, 
-    DiskLimits, NetworkConfig, PortMapping
+    ContainerManager, SandboxContainer, ResourceLimits, NetworkConfig, PortMapping
 };
+use soulbox::container::resource_limits::{CpuLimits, MemoryLimits, DiskLimits, NetworkLimits};
 use soulbox::error::Result;
 
 #[tokio::test]
@@ -27,6 +27,11 @@ async fn test_container_creation_should_succeed() {
         disk: DiskLimits {
             limit_mb: 2048,
             iops_limit: Some(1000),
+        },
+        network: NetworkLimits {
+            upload_bps: Some(1024 * 1024), // 1 MB/s
+            download_bps: Some(10 * 1024 * 1024), // 10 MB/s
+            max_connections: Some(100),
         },
     };
     
@@ -110,6 +115,11 @@ async fn test_resource_limits_enforcement() {
         disk: DiskLimits {
             limit_mb: 512, // Limited disk space
             iops_limit: Some(500),
+        },
+        network: NetworkLimits {
+            upload_bps: Some(512 * 1024), // 512 KB/s
+            download_bps: Some(1024 * 1024), // 1 MB/s
+            max_connections: Some(50),
         },
     };
     
@@ -401,14 +411,14 @@ pub async fn cleanup_test_containers() -> Result<()> {
 #[tokio::test]
 async fn test_grpc_protocol_with_real_containers() {
     // This test verifies that our gRPC services from Module 2 can control real containers
-    use soulbox::grpc::SoulBoxServiceImpl;
+    use soulbox::grpc::service::SoulBoxServiceImpl;
     
     let grpc_service = SoulBoxServiceImpl::new();
     let config = soulbox::Config::default();
     let manager = ContainerManager::new(config).await.unwrap();
     
-    // Connect the gRPC service to use real container manager instead of mocks
-    grpc_service.set_container_manager(manager).await;
+    // The gRPC service is already initialized with a container manager
+    // No need to set it explicitly in this implementation
     
     // This test will be implemented once we have both modules integrated
     // For now, just verify the components can be instantiated together

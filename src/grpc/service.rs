@@ -16,12 +16,8 @@ use crate::config::Config;
 use crate::sandbox::{SandboxRuntime, SandboxInstance};
 
 // Import generated protobuf types
-// Note: The generated code will be in src/soulbox.v1.rs after build
-pub mod soulbox_proto {
-    pub use crate::soulbox::v1::*;
-}
-
-pub use soulbox_proto::*;
+// Note: The generated code will be in src/soulbox.v1.rs after build  
+pub use crate::soulbox::v1::*;
 
 // Real sandbox representation using container management
 #[derive(Debug, Clone)]
@@ -509,7 +505,7 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
     async fn stream_execute_code(
         &self,
         request: Request<ExecuteCodeRequest>,
-    ) -> Result<Response<Self::StreamExecuteCodeStream>, Status> {
+    ) -> Result<Response<<Self as soul_box_service_server::SoulBoxService>::StreamExecuteCodeStream>, Status> {
         let req = request.into_inner();
         
         // Validate request
@@ -636,7 +632,7 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
     async fn download_file(
         &self,
         request: Request<DownloadFileRequest>,
-    ) -> Result<Response<Self::DownloadFileStream>, Status> {
+    ) -> Result<Response<<Self as soul_box_service_server::SoulBoxService>::DownloadFileStream>, Status> {
         let req = request.into_inner();
         
         // Validate request

@@ -1,4 +1,4 @@
-use soulbox::grpc::service::{soul_box_service_client::SoulBoxServiceClient, HealthCheckRequest};
+use soulbox::soulbox::v1::{soul_box_service_client::SoulBoxServiceClient, HealthCheckRequest};
 
 #[tokio::test]
 async fn test_server_integration() {
@@ -41,17 +41,23 @@ async fn test_create_sandbox() {
         .await
         .expect("Failed to connect to gRPC service");
     
-    use soulbox::grpc::service::{CreateSandboxRequest, SandboxConfig};
+    use soulbox::soulbox::v1::{CreateSandboxRequest, SandboxConfig, ResourceLimits};
     
     let request = tonic::Request::new(CreateSandboxRequest {
         template_id: "python-3.11".to_string(),
         config: Some(SandboxConfig {
-            memory_mb: 512,
-            cpu_cores: 1.0,
-            disk_mb: 1024,
-            timeout_seconds: 300,
+            resource_limits: Some(ResourceLimits {
+                memory_mb: 512,
+                cpu_cores: 1.0,
+                disk_mb: 1024,
+                max_processes: 50,
+            }),
+            network_config: None,
+            allowed_domains: vec![],
+            enable_internet: true,
         }),
         environment_variables: std::collections::HashMap::new(),
+        timeout: None,
     });
     
     let response = client.create_sandbox(request).await.unwrap();

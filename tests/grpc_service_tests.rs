@@ -3,13 +3,8 @@ use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 use tokio::time::timeout;
 
-// Import generated protobuf code
-// TODO: Re-enable once protobuf generation is working
-// mod soulbox_proto {
-//     tonic::include_proto!("soulbox.v1");
-// }
-// 
-// use soulbox_proto::*;
+// Import from our crate
+use soulbox::soulbox::v1::*;
 
 #[tokio::test]
 async fn test_create_sandbox_should_return_valid_response() {

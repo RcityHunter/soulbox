@@ -324,7 +324,7 @@ impl CostCalculator {
     }
 
     /// Calculate total discounts from a list of discount types with precision
-    fn calculate_total_discounts(&self, discounts: &[DiscountType], subtotal: Decimal) -> Result<Decimal, String> {
+    pub fn calculate_total_discounts(&self, discounts: &[DiscountType], subtotal: Decimal) -> Result<Decimal, String> {
         let mut total_discount = FinancialPrecision::zero_amount();
         let mut remaining_amount = subtotal;
 

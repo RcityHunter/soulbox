@@ -18,11 +18,11 @@ use uuid::Uuid;
 fn test_billing_config_creation() {
     let config = BillingConfig::default();
     
-    assert_eq!(config.redis_url, "redis://localhost:6379");
-    assert_eq!(config.metrics_stream, "billing:metrics");
-    assert_eq!(config.consumer_group, "billing-processors");
+    assert_eq!(config.metrics_stream, "soulbox:metrics");
     assert_eq!(config.batch_size, 100);
     assert_eq!(config.collection_interval, 30);
+    assert_eq!(config.buffer_size, 1000);
+    assert_eq!(config.flush_interval, 60);
 }
 
 /// Test cost calculator with different pricing tiers

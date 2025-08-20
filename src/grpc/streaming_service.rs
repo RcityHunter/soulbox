@@ -16,7 +16,7 @@ use uuid::Uuid;
 // pub use soulbox_proto::*;
 
 // Temporarily use mock types
-use crate::soulbox::v1::*;
+pub use crate::soulbox::v1::*;
 
 #[derive(Debug)]
 pub struct StreamingServiceImpl {
@@ -46,7 +46,7 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
     async fn sandbox_stream(
         &self,
         request: Request<Streaming<SandboxStreamRequest>>,
-    ) -> Result<Response<Self::SandboxStreamStream>, Status> {
+    ) -> Result<Response<<Self as streaming_service_server::StreamingService>::SandboxStreamStream>, Status> {
         let mut stream = request.into_inner();
         let active_streams = Arc::clone(&self.active_streams);
         
@@ -199,7 +199,7 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
     async fn terminal_stream(
         &self,
         request: Request<Streaming<TerminalStreamRequest>>,
-    ) -> Result<Response<Self::TerminalStreamStream>, Status> {
+    ) -> Result<Response<<Self as streaming_service_server::StreamingService>::TerminalStreamStream>, Status> {
         let mut stream = request.into_inner();
         let active_terminals = Arc::clone(&self.active_terminals);
         

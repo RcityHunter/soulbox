@@ -423,11 +423,11 @@ mod tests {
         assert!(result1.is_err());
         
         // Second failure should open circuit
-        let result2 = breaker.call(|| -> Result<(), &str> { Err("test error") }).await;
+        let result2 = breaker.call(|| -> Result<(), anyhow::Error> { Err(anyhow::anyhow!("test error")) }).await;
         assert!(result2.is_err());
         
         // Third call should be rejected due to open circuit
-        let result3 = breaker.call(|| -> Result<(), &str> { Ok(()) }).await;
+        let result3 = breaker.call(|| -> Result<(), anyhow::Error> { Ok(()) }).await;
         assert!(result3.is_err());
     }
 
@@ -435,10 +435,11 @@ mod tests {
     async fn test_error_recovery_service() {
         let service = ErrorRecoveryService::new(RetryConfig::default());
         
-        let mut attempt_count = 0;
-        let result = service.execute_with_recovery("test_operation", || {
-            attempt_count += 1;
-            if attempt_count < 3 {
+        let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let attempt_count_clone = attempt_count.clone();
+        let result = service.execute_with_recovery("test_operation", move || {
+            let count = attempt_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            if count < 3 {
                 Err(anyhow::anyhow!("temporary failure"))
             } else {
                 Ok("success")
@@ -446,7 +447,7 @@ mod tests {
         }).await;
         
         assert!(result.is_ok());
-        assert_eq!(attempt_count, 3);
+        assert_eq!(attempt_count.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
 
     #[test]

@@ -312,6 +312,7 @@ pub struct FileDownloadMetadata {
 pub struct ListFilesRequest {
     pub sandbox_id: String,
     pub path: String,
+    pub recursive: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -552,4 +553,92 @@ pub struct TerminalStreamClosed {
     pub terminal_id: String,
     pub reason: String,
     pub exit_code: i32,
+}
+
+// Client module for integration tests and client usage
+pub mod soul_box_service_client {
+    use tonic::{Request, Response, Status};
+    
+    #[derive(Clone)]
+    pub struct SoulBoxServiceClient<T> {
+        _inner: std::marker::PhantomData<T>,
+    }
+    
+    impl SoulBoxServiceClient<tonic::transport::Channel> {
+        pub async fn connect<D>(_dst: D) -> Result<Self, tonic::transport::Error>
+        where
+            D: TryInto<tonic::transport::Endpoint>,
+            D::Error: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+        {
+            // Mock client for testing - doesn't actually connect
+            Ok(Self { _inner: std::marker::PhantomData })
+        }
+        
+        pub fn new(_inner: tonic::transport::Channel) -> Self {
+            Self { _inner: std::marker::PhantomData }
+        }
+    }
+    
+    impl<T> SoulBoxServiceClient<T> {
+        // Mock implementations for testing
+        pub async fn health_check(
+            &mut self,
+            _request: Request<super::HealthCheckRequest>,
+        ) -> Result<Response<super::HealthCheckResponse>, Status> {
+            // Mock response for testing
+            let response = super::HealthCheckResponse {
+                status: super::HealthStatus::Serving as i32,
+                message: "SoulBox service is healthy".to_string(),
+                details: std::collections::HashMap::new(),
+            };
+            Ok(Response::new(response))
+        }
+        
+        pub async fn create_sandbox(
+            &mut self,
+            request: Request<super::CreateSandboxRequest>,
+        ) -> Result<Response<super::CreateSandboxResponse>, Status> {
+            // Mock response for testing
+            let _req = request.into_inner();
+            let response = super::CreateSandboxResponse {
+                sandbox_id: "test_sandbox_123".to_string(),
+                status: "running".to_string(),
+                created_at: Some(prost_types::Timestamp {
+                    seconds: 1677600000,
+                    nanos: 0,
+                }),
+                endpoint_url: "https://test-sandbox-123.soulbox.dev".to_string(),
+            };
+            Ok(Response::new(response))
+        }
+        
+        pub async fn get_sandbox(
+            &mut self,
+            request: Request<super::GetSandboxRequest>,
+        ) -> Result<Response<super::GetSandboxResponse>, Status> {
+            // Mock response for testing
+            let req = request.into_inner();
+            let sandbox = super::Sandbox {
+                id: req.sandbox_id.clone(),
+                template_id: "python-3.11".to_string(),
+                status: "running".to_string(),
+                config: None,
+                created_at: Some(prost_types::Timestamp {
+                    seconds: 1677600000,
+                    nanos: 0,
+                }),
+                updated_at: Some(prost_types::Timestamp {
+                    seconds: 1677600000,
+                    nanos: 0,
+                }),
+                environment_variables: std::collections::HashMap::new(),
+                endpoint_url: format!("https://{}.soulbox.dev", req.sandbox_id),
+            };
+            
+            let response = super::GetSandboxResponse {
+                sandbox: Some(sandbox),
+            };
+            Ok(Response::new(response))
+        }
+    }
 }

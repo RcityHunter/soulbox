@@ -2,7 +2,8 @@ use std::time::Duration;
 use serde_json::json;
 
 // Import from our crate
-use soulbox::grpc::{SoulBoxServiceImpl, StreamingServiceImpl};
+use soulbox::grpc::service::SoulBoxServiceImpl;
+use soulbox::grpc::streaming_service::StreamingServiceImpl;
 use soulbox::websocket::{WebSocketServer, WebSocketMessage, WebSocketResponse};
 
 #[tokio::test]

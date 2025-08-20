@@ -19,6 +19,8 @@ pub mod proxy;
 pub use port_mapping::{PortMappingManager, PortAllocationError};
 pub use proxy::{ProxyConfig, ProxyManager, ProxyError};
 
+// Temporary types for compilation compatibility (removed duplicates)
+
 /// Basic network configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NetworkConfig {
