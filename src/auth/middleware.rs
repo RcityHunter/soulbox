@@ -406,7 +406,7 @@ mod tests {
             "test-secret",
             "soulbox".to_string(),
             "soulbox-api".to_string(),
-        ));
+        ).unwrap());
         
         let auth_middleware = Arc::new(AuthMiddleware::new(jwt_manager.clone()));
         
@@ -437,7 +437,7 @@ mod tests {
             "test-secret",
             "soulbox".to_string(),
             "soulbox-api".to_string(),
-        ));
+        ).unwrap());
         
         let auth_middleware = Arc::new(AuthMiddleware::new(jwt_manager));
         
@@ -464,7 +464,7 @@ mod tests {
             "test-secret",
             "soulbox".to_string(),
             "soulbox-api".to_string(),
-        ));
+        ).unwrap());
         
         let auth_middleware = Arc::new(AuthMiddleware::new(jwt_manager));
         

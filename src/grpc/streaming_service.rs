@@ -16,7 +16,7 @@ use uuid::Uuid;
 // pub use soulbox_proto::*;
 
 // Temporarily use mock types
-use crate::soulbox::v1::*;
+use crate::soulbox_v1::*;
 
 #[derive(Debug)]
 pub struct StreamingServiceImpl {
@@ -80,13 +80,14 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                             }
                             Some(sandbox_stream_request::Request::Command(command)) => {
                                 // Mock command processing
-                                match command.command_type.as_str() {
+                                match command.command.as_str() {
                                     "ping" => {
                                         yield Ok(SandboxStreamResponse {
                                             response: Some(sandbox_stream_response::Response::Output(
                                                 SandboxStreamOutput {
                                                     stream_id: stream_id.clone(),
                                                     data: b"pong".to_vec(),
+                                                    stream_type: StreamType::Stdout as i32,
                                                     output_type: OutputType::Stdout as i32,
                                                 }
                                             ))
@@ -99,6 +100,7 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                                                 SandboxStreamOutput {
                                                     stream_id: stream_id.clone(),
                                                     data: b"Executing command...\n".to_vec(),
+                                                    stream_type: StreamType::Stdout as i32,
                                                     output_type: OutputType::Stdout as i32,
                                                 }
                                             ))
@@ -111,6 +113,7 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                                                 SandboxStreamOutput {
                                                     stream_id: stream_id.clone(),
                                                     data: b"Command completed successfully\n".to_vec(),
+                                                    stream_type: StreamType::Stdout as i32,
                                                     output_type: OutputType::Stdout as i32,
                                                 }
                                             ))
@@ -121,7 +124,8 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                                             response: Some(sandbox_stream_response::Response::Error(
                                                 SandboxStreamError {
                                                     stream_id: stream_id.clone(),
-                                                    error_message: format!("Unknown command: {}", command.command_type),
+                                                    message: format!("Unknown command: {}", command.command),
+                                                    code: 400,
                                                 }
                                             ))
                                         });
@@ -134,18 +138,31 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                                     response: Some(sandbox_stream_response::Response::Output(
                                         SandboxStreamOutput {
                                             stream_id: stream_id.clone(),
-                                            data: data.data,
+                                            data: data,
+                                            stream_type: StreamType::Stdout as i32,
                                             output_type: OutputType::Stdout as i32,
                                         }
                                     ))
                                 });
+                            }
+                            Some(sandbox_stream_request::Request::Close(close)) => {
+                                // Handle stream close
+                                yield Ok(SandboxStreamResponse {
+                                    response: Some(sandbox_stream_response::Response::Closed(
+                                        SandboxStreamClosed {
+                                            reason: close.reason.clone(),
+                                        }
+                                    ))
+                                });
+                                break;
                             }
                             None => {
                                 yield Ok(SandboxStreamResponse {
                                     response: Some(sandbox_stream_response::Response::Error(
                                         SandboxStreamError {
                                             stream_id: stream_id.clone(),
-                                            error_message: "Invalid stream request".to_string(),
+                                            message: "Invalid stream request".to_string(),
+                                            code: 400,
                                         }
                                     ))
                                 });
@@ -158,7 +175,8 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                             response: Some(sandbox_stream_response::Response::Error(
                                 SandboxStreamError {
                                     stream_id: stream_id.clone(),
-                                    error_message: format!("Stream error: {e}"),
+                                    message: format!("Stream error: {e}"),
+                                    code: 500,
                                 }
                             ))
                         });
@@ -188,7 +206,7 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
         let output_stream = async_stream::stream! {
             let mut terminal_id = String::new();
             let mut sandbox_id = String::new();
-            let mut terminal_config: Option<TerminalConfig> = None;
+            let mut terminal_config: Option<String> = None; // Simplified for now
 
             while let Some(request_result) = stream.next().await {
                 match request_result {
@@ -196,7 +214,7 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                         match req.request {
                             Some(terminal_stream_request::Request::Init(init)) => {
                                 sandbox_id = init.sandbox_id.clone();
-                                terminal_config = init.config;
+                                terminal_config = Some(init.terminal_type.clone());
                                 terminal_id = format!("term_{}", Uuid::new_v4().to_string().replace("-", "")[..8].to_lowercase());
                                 
                                 // Store active terminal
@@ -207,7 +225,7 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                                 
                                 yield Ok(TerminalStreamResponse {
                                     response: Some(terminal_stream_response::Response::Ready(
-                                        TerminalReady {
+                                        TerminalStreamReady {
                                             terminal_id: terminal_id.clone(),
                                         }
                                     ))
@@ -215,61 +233,47 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                                 
                                 // Send initial shell prompt
                                 let shell_prompt = if let Some(config) = &terminal_config {
-                                    format!("{}@soulbox:{}$ ", "user", config.working_directory)
+                                    format!("{}@soulbox:{}$ ", "user", "/workspace")
                                 } else {
                                     "user@soulbox:/workspace$ ".to_string()
                                 };
                                 
                                 yield Ok(TerminalStreamResponse {
                                     response: Some(terminal_stream_response::Response::Output(
-                                        TerminalOutput {
-                                            terminal_id: terminal_id.clone(),
-                                            data: shell_prompt.as_bytes().to_vec(),
-                                        }
+                                        shell_prompt.as_bytes().to_vec()
                                     ))
                                 });
                             }
                             Some(terminal_stream_request::Request::Input(input)) => {
-                                let input_str = String::from_utf8_lossy(&input.data);
+                                let input_str = String::from_utf8_lossy(&input);
                                 
                                 // Mock terminal command processing
                                 if input_str.trim() == "echo 'Hello Terminal'" {
                                     yield Ok(TerminalStreamResponse {
                                         response: Some(terminal_stream_response::Response::Output(
-                                            TerminalOutput {
-                                                terminal_id: terminal_id.clone(),
-                                                data: b"Hello Terminal\n".to_vec(),
-                                            }
+                                            b"Hello Terminal\n".to_vec()
                                         ))
                                     });
                                 } else if input_str.trim().starts_with("ls") {
                                     yield Ok(TerminalStreamResponse {
                                         response: Some(terminal_stream_response::Response::Output(
-                                            TerminalOutput {
-                                                terminal_id: terminal_id.clone(),
-                                                data: b"package.json  src  index.js\n".to_vec(),
-                                            }
+                                            b"package.json  src  index.js\n".to_vec()
                                         ))
                                     });
                                 } else if input_str.trim() == "pwd" {
-                                    let working_dir = terminal_config
-                                        .as_ref()
-                                        .map(|c| c.working_directory.clone())
-                                        .unwrap_or_else(|| "/workspace".to_string());
+                                    let working_dir = "/workspace".to_string();
                                     
                                     yield Ok(TerminalStreamResponse {
                                         response: Some(terminal_stream_response::Response::Output(
-                                            TerminalOutput {
-                                                terminal_id: terminal_id.clone(),
-                                                data: format!("{working_dir}\n").as_bytes().to_vec(),
-                                            }
+                                            format!("{working_dir}\n").as_bytes().to_vec()
                                         ))
                                     });
                                 } else if input_str.trim() == "exit" {
                                     yield Ok(TerminalStreamResponse {
                                         response: Some(terminal_stream_response::Response::Closed(
-                                            TerminalClosed {
+                                            TerminalStreamClosed {
                                                 terminal_id: terminal_id.clone(),
+                                                reason: "Terminal session ended".to_string(),
                                                 exit_code: 0,
                                             }
                                         ))
@@ -279,10 +283,7 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                                     // Echo the command and simulate unknown command
                                     yield Ok(TerminalStreamResponse {
                                         response: Some(terminal_stream_response::Response::Output(
-                                            TerminalOutput {
-                                                terminal_id: terminal_id.clone(),
-                                                data: format!("bash: {}: command not found\n", input_str.trim()).as_bytes().to_vec(),
-                                            }
+                                            format!("bash: {}: command not found\n", input_str.trim()).as_bytes().to_vec()
                                         ))
                                     });
                                 }
@@ -290,17 +291,14 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                                 // Send new prompt after processing command
                                 if input_str.contains('\n') && !input_str.trim().is_empty() {
                                     let shell_prompt = if let Some(config) = &terminal_config {
-                                        format!("user@soulbox:{}$ ", config.working_directory)
+                                        format!("user@soulbox:/workspace$ ")
                                     } else {
                                         "user@soulbox:/workspace$ ".to_string()
                                     };
                                     
                                     yield Ok(TerminalStreamResponse {
                                         response: Some(terminal_stream_response::Response::Output(
-                                            TerminalOutput {
-                                                terminal_id: terminal_id.clone(),
-                                                data: shell_prompt.as_bytes().to_vec(),
-                                            }
+                                            shell_prompt.as_bytes().to_vec()
                                         ))
                                     });
                                 }
@@ -309,12 +307,26 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                                 info!("Terminal resize: {}x{}", resize.cols, resize.rows);
                                 // In a real implementation, we would resize the terminal
                             }
+                            Some(terminal_stream_request::Request::Close(close)) => {
+                                // Handle terminal close
+                                yield Ok(TerminalStreamResponse {
+                                    response: Some(terminal_stream_response::Response::Closed(
+                                        TerminalStreamClosed {
+                                            terminal_id: terminal_id.clone(),
+                                            reason: close.reason.clone(),
+                                            exit_code: 0,
+                                        }
+                                    ))
+                                });
+                                break;
+                            }
                             None => {
                                 yield Ok(TerminalStreamResponse {
                                     response: Some(terminal_stream_response::Response::Error(
-                                        TerminalError {
+                                        TerminalStreamError {
                                             terminal_id: terminal_id.clone(),
-                                            error_message: "Invalid terminal request".to_string(),
+                                            message: "Invalid terminal request".to_string(),
+                                            code: 400,
                                         }
                                     ))
                                 });
@@ -325,9 +337,10 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
                         error!("Terminal stream error: {}", e);
                         yield Ok(TerminalStreamResponse {
                             response: Some(terminal_stream_response::Response::Error(
-                                TerminalError {
+                                TerminalStreamError {
                                     terminal_id: terminal_id.clone(),
-                                    error_message: format!("Terminal stream error: {e}"),
+                                    message: format!("Terminal stream error: {e}"),
+                                    code: 500,
                                 }
                             ))
                         });

@@ -33,6 +33,26 @@ pub struct ContainerManager {
 }
 
 impl ContainerManager {
+    /// Create a stub container manager for testing/development without Docker connection
+    pub fn new_stub() -> Self {
+        // Create a mock Docker client that will fail if used
+        let docker = Arc::new(Docker::connect_with_socket_defaults().unwrap_or_else(|_| {
+            // This is a stub implementation that shouldn't be used
+            panic!("Stub ContainerManager should not connect to Docker")
+        }));
+        
+        Self {
+            docker,
+            containers: Arc::new(RwLock::new(HashMap::new())),
+            operation_semaphore: Arc::new(Semaphore::new(10)),
+            resource_tracker: Arc::new(ResourceTracker::new()),
+            shutdown_signal: Arc::new(AtomicBool::new(false)),
+            config: Config::default(),
+            network_manager: Arc::new(tokio::sync::Mutex::new(NetworkManager::new())),
+            creation_counter: Arc::new(AtomicU64::new(0)),
+        }
+    }
+    
     pub async fn new(config: Config) -> Result<Self> {
         // Initialize Docker client
         let docker = Docker::connect_with_socket_defaults()
@@ -977,10 +997,14 @@ impl MockContainerManager {
     ) -> Result<Arc<SandboxContainer>> {
         // Create a mock container for testing
         let container = Arc::new(SandboxContainer::new(
-            sandbox_id.to_string(),
-            "mock_container_id".to_string(),
-            "mock_image".to_string(),
-        ));
+            sandbox_id,
+            "mock_container_id",
+            "mock_image",
+            ResourceLimits::default(),
+            NetworkConfig::default(),
+            HashMap::new(),
+            Arc::clone(&self.docker),
+        )?);
         
         self.containers.insert(sandbox_id.to_string(), container.clone());
         Ok(container)

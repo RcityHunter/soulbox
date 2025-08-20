@@ -12,7 +12,8 @@ use soulbox::error::Result;
 #[tokio::test]
 async fn test_container_creation_should_succeed() {
     // This test will initially fail because ContainerManager doesn't exist yet
-    let manager = ContainerManager::new().await.unwrap();
+    let config = soulbox::Config::default();
+    let manager = ContainerManager::new(config).await.unwrap();
     
     let resource_limits = ResourceLimits {
         cpu: CpuLimits {
@@ -58,7 +59,8 @@ async fn test_container_creation_should_succeed() {
 #[tokio::test]
 async fn test_container_lifecycle_management() {
     // Test complete lifecycle: create -> start -> stop -> remove
-    let manager = ContainerManager::new().await.unwrap();
+    let config = soulbox::Config::default();
+    let manager = ContainerManager::new(config).await.unwrap();
     
     let resource_limits = ResourceLimits::default();
     let network_config = NetworkConfig::default();
@@ -93,7 +95,8 @@ async fn test_container_lifecycle_management() {
 #[tokio::test]
 async fn test_resource_limits_enforcement() {
     // Test that resource limits are properly applied and enforced
-    let manager = ContainerManager::new().await.unwrap();
+    let config = soulbox::Config::default();
+    let manager = ContainerManager::new(config).await.unwrap();
     
     let strict_limits = ResourceLimits {
         cpu: CpuLimits {
@@ -137,7 +140,8 @@ async fn test_resource_limits_enforcement() {
 #[tokio::test] 
 async fn test_network_isolation_and_port_mapping() {
     // Test network isolation and port mapping functionality
-    let manager = ContainerManager::new().await.unwrap();
+    let config = soulbox::Config::default();
+    let manager = ContainerManager::new(config).await.unwrap();
     
     let network_config = NetworkConfig {
         enable_internet: false, // Isolated from internet
@@ -179,7 +183,8 @@ async fn test_network_isolation_and_port_mapping() {
 #[tokio::test]
 async fn test_file_system_isolation() {
     // Test that containers have isolated file systems
-    let manager = ContainerManager::new().await.unwrap();
+    let config = soulbox::Config::default();
+    let manager = ContainerManager::new(config).await.unwrap();
     
     let container1 = manager.create_sandbox_container(
         "fs-test-1",
@@ -219,7 +224,8 @@ async fn test_file_system_isolation() {
 #[tokio::test]
 async fn test_container_execution_timeout() {
     // Test that long-running commands can be properly timed out
-    let manager = ContainerManager::new().await.unwrap();
+    let config = soulbox::Config::default();
+    let manager = ContainerManager::new(config).await.unwrap();
     
     let container = manager.create_sandbox_container(
         "timeout-test-sandbox",
@@ -250,7 +256,8 @@ async fn test_container_execution_timeout() {
 #[tokio::test]
 async fn test_concurrent_container_operations() {
     // Test that multiple containers can be managed concurrently
-    let manager = ContainerManager::new().await.unwrap();
+    let config = soulbox::Config::default();
+    let manager = ContainerManager::new(config).await.unwrap();
     let container_count = 5;
     
     let mut tasks = Vec::new();
@@ -293,7 +300,8 @@ async fn test_concurrent_container_operations() {
 async fn test_container_cleanup_on_manager_drop() {
     // Test that containers are properly cleaned up when manager is dropped
     let container_id = {
-        let manager = ContainerManager::new().await.unwrap();
+        let config = soulbox::Config::default();
+    let manager = ContainerManager::new(config).await.unwrap();
         
         let container = manager.create_sandbox_container(
             "cleanup-test-sandbox",
@@ -312,7 +320,8 @@ async fn test_container_cleanup_on_manager_drop() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     
     // Try to create a new manager and verify the container is gone
-    let new_manager = ContainerManager::new().await.unwrap();
+    let config = soulbox::Config::default();
+    let new_manager = ContainerManager::new(config).await.unwrap();
     let existing_containers = new_manager.list_containers().await.unwrap();
     
     // The cleanup-test-sandbox should not exist anymore
@@ -322,7 +331,8 @@ async fn test_container_cleanup_on_manager_drop() {
 #[tokio::test]
 async fn test_environment_variable_injection() {
     // Test that environment variables are properly injected into containers
-    let manager = ContainerManager::new().await.unwrap();
+    let config = soulbox::Config::default();
+    let manager = ContainerManager::new(config).await.unwrap();
     
     let mut env_vars = HashMap::new();
     env_vars.insert("TEST_VAR".to_string(), "test_value".to_string());
@@ -394,7 +404,8 @@ async fn test_grpc_protocol_with_real_containers() {
     use soulbox::grpc::SoulBoxServiceImpl;
     
     let grpc_service = SoulBoxServiceImpl::new();
-    let manager = ContainerManager::new().await.unwrap();
+    let config = soulbox::Config::default();
+    let manager = ContainerManager::new(config).await.unwrap();
     
     // Connect the gRPC service to use real container manager instead of mocks
     grpc_service.set_container_manager(manager).await;

@@ -9,8 +9,8 @@ pub mod container;
 // Authentication and authorization
 pub mod auth;
 
-// gRPC services (temporarily disabled until protobuf generation is fixed)
-// pub mod grpc;
+// gRPC services
+pub mod grpc;
 
 // Database operations
 pub mod database;
@@ -41,6 +41,12 @@ pub mod billing;
 // Firecracker VM integration
 pub mod firecracker;
 
+// CLI support (disabled due to missing dependencies)
+// pub mod cli;
+
+// Simple API (disabled due to missing dependencies)
+// pub mod simple;
+
 // Core exports
 pub use config::Config;
 pub use error::{SoulBoxError, Result};
@@ -66,5 +72,5 @@ pub mod soulbox {
 #[path = "soulbox.v1.rs"]
 mod soulbox_v1;
 
-// gRPC exports (disabled until protobuf generation is fully working)
-// pub use grpc::FILE_DESCRIPTOR_SET;
+// gRPC exports
+pub use grpc::FILE_DESCRIPTOR_SET;

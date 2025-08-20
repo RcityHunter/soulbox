@@ -13,6 +13,7 @@ use crate::container::resource_limits::{MemoryLimits, CpuLimits, DiskLimits, Net
 use crate::container::sandbox::SandboxContainer;
 use crate::container::manager::ContainerManager;
 use crate::config::Config;
+use crate::sandbox::{SandboxRuntime, SandboxInstance};
 
 // Import generated protobuf types
 // Note: The generated code will be in src/soulbox.v1.rs after build
@@ -44,7 +45,17 @@ pub struct SoulBoxServiceImpl {
 }
 
 impl SoulBoxServiceImpl {
-    pub async fn new() -> crate::error::Result<Self> {
+    pub fn new() -> Self {
+        Self {
+            container_manager: Arc::new(ContainerManager::new_stub()), // Use stub for now
+            sandboxes: Arc::new(Mutex::new(HashMap::new())),
+            executions: Arc::new(Mutex::new(HashMap::new())),
+            runtime: Arc::new(Mutex::new(None)),
+            sandbox_instances: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+    
+    pub async fn new_async() -> crate::error::Result<Self> {
         // Create default config for container manager
         let config = Config::default(); // Using default config for now
         let container_manager = Arc::new(ContainerManager::new(config).await?);

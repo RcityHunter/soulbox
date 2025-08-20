@@ -439,7 +439,7 @@ mod tests {
         let result = service.execute_with_recovery("test_operation", || {
             attempt_count += 1;
             if attempt_count < 3 {
-                Err("temporary failure")
+                Err(anyhow::anyhow!("temporary failure"))
             } else {
                 Ok("success")
             }
