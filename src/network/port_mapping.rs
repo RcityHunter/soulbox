@@ -8,10 +8,11 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::net::{TcpListener, UdpSocket};
+// use std::net::TcpListener; // Temporarily unused
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use tracing::{debug, warn, error, info};
+use tracing::{debug, error, info};
+use rand::seq::SliceRandom;
 
 /// Port allocation and management errors
 #[derive(Error, Debug)]
@@ -244,7 +245,7 @@ impl PortMappingManager {
         // Try to allocate ports atomically
         for port in candidate_ports {
             // Atomic check-and-set operation
-            let allocation_result = {
+            let allocation_result: Result<u16, PortAllocationError> = {
                 let mut allocated = self.allocated_ports.lock().unwrap();
                 
                 // Check if port is already allocated (inside the lock for atomicity)
@@ -353,7 +354,7 @@ impl PortMappingManager {
         // Record in allocated ports
         {
             let mut allocated = self.allocated_ports.lock().unwrap();
-            allocated.insert(host_port, allocation);
+            allocated.insert(host_port, allocation.clone());
         }
         
         // Record in sandbox ports
@@ -362,7 +363,7 @@ impl PortMappingManager {
             sandbox_ports
                 .entry(sandbox_id.to_string())
                 .or_insert_with(Vec::new)
-                .push(allocation.clone());
+                .push(allocation);
         }
         
         // Update stats

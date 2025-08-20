@@ -15,9 +15,35 @@ use thiserror::Error;
 pub mod port_mapping;
 pub mod proxy;
 
-pub use crate::container::network::{NetworkConfig, PortMapping};
+// pub use crate::container::network::{NetworkConfig, PortMapping}; // Temporarily disabled until container module is re-enabled
 pub use port_mapping::{PortMappingManager, PortAllocationError};
 pub use proxy::{ProxyConfig, ProxyManager, ProxyError};
+
+/// Basic network configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NetworkConfig {
+    /// Network bridge name
+    pub bridge: Option<String>,
+    /// DNS servers
+    pub dns_servers: Vec<IpAddr>,
+    /// Subnet CIDR
+    pub subnet: Option<String>,
+    /// Gateway IP
+    pub gateway: Option<IpAddr>,
+    /// Port mappings
+    pub port_mappings: Vec<PortMapping>,
+}
+
+/// Port mapping configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortMapping {
+    /// Host port
+    pub host_port: u16,
+    /// Container port
+    pub container_port: u16,
+    /// Protocol (tcp/udp)
+    pub protocol: String,
+}
 
 /// Comprehensive network configuration for a sandbox
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -281,7 +307,7 @@ impl NetworkManager {
                 self.port_service.allocate_port(
                     sandbox_id,
                     port_mapping.container_port,
-                    port_mapping.host_port,
+                    Some(port_mapping.host_port),
                 )?;
             }
         }

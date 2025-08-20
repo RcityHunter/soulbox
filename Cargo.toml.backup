@@ -1,0 +1,157 @@
+[package]
+name = "soulbox"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "High-performance Rust-based AI code execution sandbox"
+license = "MIT"
+repository = "https://github.com/yourusername/soulbox"
+homepage = "https://soulbox.dev"
+readme = "README.md"
+keywords = ["sandbox", "code-execution", "ai", "grpc", "websocket"]
+categories = ["development-tools", "web-programming", "api-bindings"]
+
+[features]
+default = ["server", "client"]
+server = []
+client = []
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Date/Time
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.9"
+
+# Environment
+dotenvy = "0.15"
+
+# UUID
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# gRPC and Protocol Buffers
+tonic = "0.14"
+tonic-build = "0.14"
+tonic-reflection = "0.14"
+prost = "0.12"
+
+# WebSocket
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
+
+# HTTP
+axum = "0.8"
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Testing
+mockall = "0.12"
+
+# Async streams
+async-stream = "0.3"
+tokio-stream = "0.1"
+
+# Additional utilities
+futures = "0.3"
+prost-types = "0.12"
+
+# CLI dependencies
+clap = { version = "4.4", features = ["derive", "color", "suggestions"] }
+colored = "2.0"
+indicatif = "0.17"
+dirs = "5.0"
+
+# Container Runtime (Module 3)
+bollard = "0.16"
+tempfile = "3.8"
+notify = "6.1"
+sysinfo = "0.31"
+
+# Firecracker VM support and utilities
+rand = "0.8"
+async-trait = "0.1"
+
+# Authentication and security
+jsonwebtoken = "9.2"
+sha2 = "0.10"
+bcrypt = "0.15"
+base64 = "0.21"
+
+# Database
+surrealdb = { version = "1.5", features = ["kv-rocksdb"] }
+
+# Redis for session persistence and billing streams
+redis = { version = "0.25", features = ["tokio-comp", "connection-manager", "streams"] }
+
+# Parking lot for better synchronization primitives
+parking_lot = "0.12"
+
+# Atomic utilities
+atomic = "0.6"
+
+# Prometheus metrics
+prometheus = "0.13"
+axum-prometheus = "0.9"
+
+# Regex for runtime detection
+regex = "1.10"
+
+# Compression for dependency caching
+flate2 = "1.0"
+
+# URL parsing for proxy
+url = "2.4"
+urlencoding = "2.1"
+
+# Billing system dependencies
+rust_decimal = { version = "1.35", features = ["serde-float", "tokio-pg"] }
+
+[build-dependencies]
+tonic-build = "0.14"
+prost-build = "0.12"
+
+[dev-dependencies]
+reqwest = { version = "0.11", features = ["json"] }
+tokio-test = "0.4"
+criterion = { version = "0.5", features = ["html_reports"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[[bin]]
+name = "soulbox"
+path = "src/main.rs"
+
+[[bin]]
+name = "soulbox-agent"
+path = "src/bin/soulbox-agent.rs"
+
+[[bin]]
+name = "soulbox-cli"
+path = "src/bin/soulbox-cli.rs"
+
+[[bench]]
+name = "regression_tests"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true

@@ -8,11 +8,15 @@ use tracing::{info, error};
 use uuid::Uuid;
 
 // Import generated protobuf types
-mod soulbox_proto {
-    tonic::include_proto!("soulbox.v1");
-}
+// TODO: Re-enable once protobuf generation is working
+// mod soulbox_proto {
+//     tonic::include_proto!("soulbox.v1");
+// }
+// 
+// pub use soulbox_proto::*;
 
-pub use soulbox_proto::*;
+// Temporarily use mock types
+use crate::soulbox::v1::*;
 
 #[derive(Debug)]
 pub struct StreamingServiceImpl {

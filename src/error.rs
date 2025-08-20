@@ -319,7 +319,7 @@ pub enum SoulBoxError {
     ResourceLimit(String),
 
     #[error("Resource not found: {0}")]
-    NotFound(String),
+    ResourceNotFound(String),
 
     #[error("Network error: {0}")]
     Network(String),
@@ -668,7 +668,11 @@ impl SoulBoxError {
     }
 
     pub fn not_found(msg: impl Into<String>) -> Self {
-        Self::NotFound(msg.into())
+        Self::NotFound { 
+            message: msg.into(),
+            resource_type: None,
+            resource_id: None,
+        }
     }
 
     pub fn invalid_state(msg: impl Into<String>) -> Self {
@@ -731,7 +735,7 @@ impl SoulBoxError {
             SoulBoxError::ResourceLimit(_) => "RESOURCE_LIMIT_ERROR",
             SoulBoxError::Security(_) => "SECURITY_ERROR",
             SoulBoxError::Internal(_) => "INTERNAL_ERROR",
-            SoulBoxError::NotFound(_) => "NOT_FOUND",
+            SoulBoxError::NotFound { .. } => "NOT_FOUND",
             SoulBoxError::InvalidState(_) => "INVALID_STATE",
             SoulBoxError::Unsupported(_) => "UNSUPPORTED",
             SoulBoxError::Database(_) => "DATABASE_ERROR",
@@ -759,7 +763,7 @@ impl SoulBoxError {
             SoulBoxError::Authentication { .. } => false,
             SoulBoxError::Authorization { .. } => false,
             SoulBoxError::Validation(_) => false,
-            SoulBoxError::NotFound(_) => false,
+            SoulBoxError::NotFound { .. } => false,
             SoulBoxError::Unsupported(_) => false,
             _ => false,
         }
@@ -770,7 +774,7 @@ impl SoulBoxError {
         match self {
             SoulBoxError::Authentication { .. } => 401,
             SoulBoxError::Authorization { .. } => 403,
-            SoulBoxError::NotFound(_) => 404,
+            SoulBoxError::NotFound { .. } => 404,
             SoulBoxError::Validation(_) => 400,
             SoulBoxError::ResourceLimit(_) => 429,
             SoulBoxError::Timeout(_) => 408,
@@ -812,7 +816,7 @@ impl axum::response::IntoResponse for SoulBoxError {
             SoulBoxError::Forbidden { message, .. } => message.clone(),
             SoulBoxError::ValidationError { field, reason, .. } => format!("Validation failed for {}: {}", field, reason),
             SoulBoxError::RateLimitExceeded { resource, limit, window, .. } => format!("Rate limit exceeded for {}: {} requests per {}", resource, limit, window),
-            SoulBoxError::ResourceExhausted { resource, current, limit, .. } => format!("Resource exhausted {}: {}/{}", resource, current, limit),
+            SoulBoxError::ResourceExhausted { resource, current_usage, limit, .. } => format!("Resource exhausted {}: {}/{}", resource, current_usage, limit),
             SoulBoxError::SecurityViolation { message, .. } => message.clone(),
             SoulBoxError::ConfigurationValidationFailed { section, errors } => format!("{}: {}", section, errors.join(", ")),
             _ => "Internal server error".to_string(),
@@ -821,7 +825,7 @@ impl axum::response::IntoResponse for SoulBoxError {
         let error_response = json!({
             "error": {
                 "message": error_message,
-                "type": self.error_type(),
+                "type": self.error_code(),
                 "timestamp": chrono::Utc::now().to_rfc3339()
             }
         });

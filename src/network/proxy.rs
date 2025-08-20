@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use tracing::{debug, warn, error, info};
+use tracing::{error, info};
 
 /// Proxy configuration errors
 #[derive(Error, Debug)]
