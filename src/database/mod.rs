@@ -2,7 +2,7 @@ pub mod config;
 // pub mod connection;  // Legacy sqlx-based connection - disabled in favor of SurrealDB
 pub mod models;
 pub mod repositories;
-// pub mod migrations;  // Legacy sqlx-based migrations - disabled in favor of SurrealDB
+pub mod migrations;  // SurrealDB schema initialization
 pub mod surrealdb;
 
 // Legacy exports for backward compatibility (commented out for SurrealDB migration)
@@ -17,6 +17,7 @@ pub use surrealdb::{
 };
 
 pub use repositories::*;
+pub use migrations::MigrationManager;
 // use surrealdb::sql::Value;
 
 /// 数据库错误类型

@@ -185,7 +185,7 @@ impl BillingStorage {
             pipe.zadd(&user_key, &cache_key, metric.timestamp.timestamp());
         }
 
-        pipe.query_async(&mut conn).await
+        pipe.query_async::<_, ()>(&mut conn).await
             .context("Failed to batch cache metrics in Redis")?;
 
         Ok(())

@@ -11,6 +11,8 @@ use base64::Engine;
 use crate::container::{ResourceLimits as ContainerResourceLimits, NetworkConfig as ContainerNetworkConfig};
 use crate::container::resource_limits::{MemoryLimits, CpuLimits, DiskLimits, NetworkLimits};
 use crate::container::sandbox::SandboxContainer;
+use crate::container::manager::ContainerManager;
+use crate::config::Config;
 
 // Import generated protobuf types
 // Note: The generated code will be in src/soulbox.v1.rs after build
@@ -20,9 +22,9 @@ pub mod soulbox_proto {
 
 pub use soulbox_proto::*;
 
-// Mock sandbox storage for testing
+// Real sandbox representation using container management
 #[derive(Debug, Clone)]
-pub struct MockSandbox {
+pub struct SandboxInfo {
     pub id: String,
     pub template_id: String,
     pub status: String,
@@ -34,26 +36,38 @@ pub struct MockSandbox {
 }
 
 pub struct SoulBoxServiceImpl {
-    sandboxes: Arc<Mutex<HashMap<String, MockSandbox>>>,
+    container_manager: Arc<ContainerManager>,
+    sandboxes: Arc<Mutex<HashMap<String, SandboxInfo>>>, // sandbox metadata
     executions: Arc<Mutex<HashMap<String, String>>>, // execution_id -> sandbox_id
     runtime: Arc<Mutex<Option<Arc<dyn SandboxRuntime>>>>,
     sandbox_instances: Arc<Mutex<HashMap<String, Arc<dyn crate::sandbox::SandboxInstance>>>>,
 }
 
-impl Default for SoulBoxServiceImpl {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl SoulBoxServiceImpl {
-    pub fn new() -> Self {
-        Self {
+    pub async fn new() -> crate::error::Result<Self> {
+        // Create default config for container manager
+        let config = Config::default(); // Using default config for now
+        let container_manager = Arc::new(ContainerManager::new(config).await?);
+        
+        Ok(Self {
+            container_manager,
             sandboxes: Arc::new(Mutex::new(HashMap::new())),
             executions: Arc::new(Mutex::new(HashMap::new())),
             runtime: Arc::new(Mutex::new(None)),
             sandbox_instances: Arc::new(Mutex::new(HashMap::new())),
-        }
+        })
+    }
+    
+    pub async fn with_config(config: Config) -> crate::error::Result<Self> {
+        let container_manager = Arc::new(ContainerManager::new(config).await?);
+        
+        Ok(Self {
+            container_manager,
+            sandboxes: Arc::new(Mutex::new(HashMap::new())),
+            executions: Arc::new(Mutex::new(HashMap::new())),
+            runtime: Arc::new(Mutex::new(None)),
+            sandbox_instances: Arc::new(Mutex::new(HashMap::new())),
+        })
     }
 
     pub async fn set_runtime(&self, runtime: Arc<dyn SandboxRuntime>) {
@@ -61,28 +75,6 @@ impl SoulBoxServiceImpl {
         *runtime_lock = Some(runtime);
     }
 
-    async fn create_mock_sandbox(&self, request: &CreateSandboxRequest) -> MockSandbox {
-        let sandbox_id = format!("sb_{}", Uuid::new_v4().to_string().replace("-", "")[..8].to_lowercase());
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap();
-        
-        let timestamp = prost_types::Timestamp {
-            seconds: now.as_secs() as i64,
-            nanos: now.subsec_nanos() as i32,
-        };
-
-        MockSandbox {
-            id: sandbox_id.clone(),
-            template_id: request.template_id.clone(),
-            status: "running".to_string(),
-            config: request.config.clone(),
-            created_at: Some(timestamp.clone()),
-            updated_at: Some(timestamp),
-            environment_variables: request.environment_variables.clone(),
-            endpoint_url: format!("https://sandbox-{sandbox_id}.soulbox.dev"),
-        }
-    }
 }
 
 #[tonic::async_trait]
@@ -166,15 +158,29 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
                     return Err(Status::internal("Failed to start sandbox"));
                 }
 
-                // Create mock sandbox for tracking
-                let sandbox = self.create_mock_sandbox(&req).await;
+                // Create real sandbox info for tracking
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap();
                 
-                // Store sandbox with the actual ID
-                let mut sandbox_with_real_id = sandbox;
-                sandbox_with_real_id.id = sandbox_id.clone();
+                let timestamp = prost_types::Timestamp {
+                    seconds: now.as_secs() as i64,
+                    nanos: now.subsec_nanos() as i32,
+                };
+
+                let sandbox_info = SandboxInfo {
+                    id: sandbox_id.clone(),
+                    template_id: req.template_id.clone(),
+                    status: "running".to_string(),
+                    config: req.config.clone(),
+                    created_at: Some(timestamp.clone()),
+                    updated_at: Some(timestamp),
+                    environment_variables: req.environment_variables.clone(),
+                    endpoint_url: format!("https://sandbox-{sandbox_id}.soulbox.dev"),
+                };
                 
                 let mut sandboxes = self.sandboxes.lock().await;
-                sandboxes.insert(sandbox_id.clone(), sandbox_with_real_id.clone());
+                sandboxes.insert(sandbox_id.clone(), sandbox_info.clone());
                 drop(sandboxes);
                 
                 // Store sandbox instance
@@ -186,13 +192,13 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
                     .unwrap();
                 
                 let response = CreateSandboxResponse {
-                    sandbox_id,
+                    sandbox_id: sandbox_id.clone(),
                     status: "running".to_string(),
                     created_at: Some(prost_types::Timestamp {
                         seconds: now.as_secs() as i64,
                         nanos: now.subsec_nanos() as i32,
                     }),
-                    endpoint_url: sandbox_with_real_id.endpoint_url,
+                    endpoint_url: sandbox_info.endpoint_url,
                 };
 
                 Ok(Response::new(response))
@@ -283,17 +289,44 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
             return Err(Status::invalid_argument("Sandbox ID is required"));
         }
 
+        // First check if sandbox exists
         let mut sandboxes = self.sandboxes.lock().await;
-        let removed = sandboxes.remove(&req.sandbox_id).is_some();
+        let sandbox_exists = sandboxes.contains_key(&req.sandbox_id);
+        
+        if !sandbox_exists {
+            return Err(Status::not_found("Sandbox not found"));
+        }
 
-        if removed {
-            info!("Deleted sandbox: {}", req.sandbox_id);
-            Ok(Response::new(DeleteSandboxResponse {
-                success: true,
-                message: "Sandbox deleted successfully".to_string(),
-            }))
-        } else {
-            Err(Status::not_found("Sandbox not found"))
+        // Remove from sandbox metadata
+        sandboxes.remove(&req.sandbox_id);
+        drop(sandboxes);
+
+        // Stop and remove the actual container
+        match self.container_manager.remove_container(&req.sandbox_id).await {
+            Ok(_) => {
+                info!("Deleted sandbox and container: {}", req.sandbox_id);
+                
+                // Also remove from sandbox instances if it exists
+                let mut instances = self.sandbox_instances.lock().await;
+                if let Some(instance) = instances.remove(&req.sandbox_id) {
+                    // Attempt to stop the sandbox instance
+                    if let Err(e) = instance.stop().await {
+                        warn!("Failed to stop sandbox instance {}: {}", req.sandbox_id, e);
+                    }
+                }
+                
+                Ok(Response::new(DeleteSandboxResponse {
+                    success: true,
+                    message: "Sandbox deleted successfully".to_string(),
+                }))
+            }
+            Err(e) => {
+                error!("Failed to remove container for sandbox {}: {}", req.sandbox_id, e);
+                // Re-add to sandboxes since container removal failed
+                let mut sandboxes = self.sandboxes.lock().await;
+                // We could restore the sandbox info here, but for simplicity we'll just return error
+                Err(Status::internal("Failed to remove sandbox container"))
+            }
         }
     }
 

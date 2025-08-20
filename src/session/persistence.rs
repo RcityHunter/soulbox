@@ -120,7 +120,7 @@ impl SessionManager for RedisSessionManager {
         pipe.expire(&user_sessions_key, user_set_ttl as i64);
         
         // Execute pipeline atomically
-        pipe.query_async(&mut conn).await
+        pipe.query_async::<_, ()>(&mut conn).await
             .map_err(|e| SoulBoxError::SessionError(format!("Failed to create session atomically: {}", e)))?;
         
         info!("Created session {} for user {} with TTL {}s", session.id, user_id, ttl);
@@ -184,7 +184,7 @@ impl SessionManager for RedisSessionManager {
         }
         
         // Execute all updates atomically
-        pipe.query_async(&mut conn).await
+        pipe.query_async::<_, ()>(&mut conn).await
             .map_err(|e| SoulBoxError::SessionError(format!("Failed to update session atomically: {}", e)))?;
         
         Ok(())
@@ -202,7 +202,7 @@ impl SessionManager for RedisSessionManager {
             // Remove container mapping if exists
             if let Some(container_id) = &session.container_id {
                 let container_key = self.container_session_key(container_id);
-                let _ = conn.del(&container_key).await;
+                let _: std::result::Result<i32, _> = conn.del(&container_key).await;
             }
         }
         

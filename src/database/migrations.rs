@@ -1,24 +1,83 @@
-use sqlx::migrate::Migrator;
-use std::path::Path;
+use tracing::{info, error};
+use surrealdb::Surreal;
+use surrealdb::engine::any::Any;
 
-/// PostgreSQL 迁移器
-pub static POSTGRES_MIGRATOR: Migrator = sqlx::migrate!("./migrations/postgres");
+use super::surrealdb::{SurrealResult, SurrealSchema};
 
-/// SQLite 迁移器
-pub static SQLITE_MIGRATOR: Migrator = sqlx::migrate!("./migrations/sqlite");
+/// SurrealDB Database Migration Manager
+pub struct MigrationManager;
 
-/// 检查迁移目录是否存在
-pub fn check_migration_dirs() -> anyhow::Result<()> {
-    let postgres_dir = Path::new("./migrations/postgres");
-    let sqlite_dir = Path::new("./migrations/sqlite");
-    
-    if !postgres_dir.exists() {
-        anyhow::bail!("PostgreSQL migration directory not found: {:?}", postgres_dir);
+impl MigrationManager {
+    /// Run database migrations/schema initialization
+    pub async fn run_migrations(db: &Surreal<Any>) -> SurrealResult<()> {
+        info!("Starting database migrations for SoulBox...");
+        
+        match SurrealSchema::initialize(db).await {
+            Ok(()) => {
+                info!("Database migrations completed successfully");
+                Ok(())
+            }
+            Err(e) => {
+                error!("Database migrations failed: {}", e);
+                Err(e)
+            }
+        }
     }
     
-    if !sqlite_dir.exists() {
-        anyhow::bail!("SQLite migration directory not found: {:?}", sqlite_dir);
+    /// Check if migrations are needed (always returns true for SurrealDB schema init)
+    pub async fn needs_migration(_db: &Surreal<Any>) -> bool {
+        // For SurrealDB, we always try to initialize schema as it's idempotent
+        // SurrealDB will not recreate tables/fields that already exist
+        true
     }
     
-    Ok(())
+    /// Reset database schema (for development/testing)
+    #[cfg(feature = "dev-tools")]
+    pub async fn reset_schema(db: &Surreal<Any>) -> SurrealResult<()> {
+        info!("Resetting database schema for development...");
+        
+        // Drop all tables in reverse dependency order
+        let tables_to_drop = [
+            "audit_logs",
+            "sessions", 
+            "api_keys",
+            "templates",
+            "sandboxes",
+            "users",
+            "tenants"
+        ];
+        
+        for table in tables_to_drop {
+            let sql = format!("REMOVE TABLE IF EXISTS {};", table);
+            match db.query(&sql).await {
+                Ok(_) => info!("Dropped table: {}", table),
+                Err(e) => error!("Failed to drop table {}: {}", table, e),
+            }
+        }
+        
+        // Re-initialize schema
+        SurrealSchema::initialize(db).await
+    }
+    
+    /// Get schema version (placeholder for future versioning)
+    pub async fn get_schema_version(_db: &Surreal<Any>) -> SurrealResult<String> {
+        // For now, return a static version
+        // In the future, this could query a version table
+        Ok("1.0.0".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[tokio::test]
+    async fn test_migration_manager() {
+        // Test basic functionality
+        assert!(MigrationManager::needs_migration(&todo!()).await);
+        assert_eq!(
+            MigrationManager::get_schema_version(&todo!()).await.unwrap(),
+            "1.0.0"
+        );
+    }
 }
