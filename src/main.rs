@@ -52,7 +52,8 @@ async fn main() -> Result<()> {
         .parse()
         .map_err(|e| anyhow::anyhow!("Invalid gRPC address: {}", e))?;
     
-    let grpc_service = grpc::service::SoulBoxServiceImpl::new();
+    let grpc_service = grpc::service::SoulBoxServiceImpl::new()
+        .map_err(|e| anyhow::anyhow!("Failed to create gRPC service: {}", e))?;
     
     // Initialize runtime based on configuration
     let runtime: Arc<dyn sandbox::SandboxRuntime> = match config.sandbox.runtime.runtime_type.as_str() {

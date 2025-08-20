@@ -16,7 +16,7 @@ use uuid::Uuid;
 // pub use soulbox_proto::*;
 
 // Temporarily use mock types
-use crate::soulbox_v1::*;
+use crate::soulbox::v1::*;
 
 #[derive(Debug)]
 pub struct StreamingServiceImpl {
@@ -41,7 +41,7 @@ impl StreamingServiceImpl {
 
 #[tonic::async_trait]
 impl streaming_service_server::StreamingService for StreamingServiceImpl {
-    type SandboxStreamStream = Pin<Box<dyn Stream<Item = Result<SandboxStreamResponse, Status>> + Send>>;
+    type SandboxStreamStream = std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<SandboxStreamResponse, Status>> + Send>>;
 
     async fn sandbox_stream(
         &self,
@@ -194,7 +194,7 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
         Ok(Response::new(Box::pin(output_stream)))
     }
 
-    type TerminalStreamStream = Pin<Box<dyn Stream<Item = Result<TerminalStreamResponse, Status>> + Send>>;
+    type TerminalStreamStream = std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<TerminalStreamResponse, Status>> + Send>>;
 
     async fn terminal_stream(
         &self,

@@ -51,6 +51,7 @@ pub mod firecracker;
 pub use config::Config;
 pub use error::{SoulBoxError, Result};
 pub use network::{NetworkManager, SandboxNetworkConfig, PortMappingManager, ProxyManager, NetworkError};
+pub use validation::InputValidator;
 
 // Container exports
 pub use container::{ContainerManager, SandboxContainer, ResourceLimits, NetworkConfig, PortMapping, ContainerPool, PoolConfig};

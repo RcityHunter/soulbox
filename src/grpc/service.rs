@@ -18,7 +18,7 @@ use crate::sandbox::{SandboxRuntime, SandboxInstance};
 // Import generated protobuf types
 // Note: The generated code will be in src/soulbox.v1.rs after build
 pub mod soulbox_proto {
-    pub use crate::soulbox_v1::*;
+    pub use crate::soulbox::v1::*;
 }
 
 pub use soulbox_proto::*;
@@ -45,14 +45,15 @@ pub struct SoulBoxServiceImpl {
 }
 
 impl SoulBoxServiceImpl {
-    pub fn new() -> Self {
-        Self {
-            container_manager: Arc::new(ContainerManager::new_stub()), // Use stub for now
+    pub fn new() -> Result<Self, crate::error::SoulBoxError> {
+        let container_manager = Arc::new(ContainerManager::new_stub()?);
+        Ok(Self {
+            container_manager,
             sandboxes: Arc::new(Mutex::new(HashMap::new())),
             executions: Arc::new(Mutex::new(HashMap::new())),
             runtime: Arc::new(Mutex::new(None)),
             sandbox_instances: Arc::new(Mutex::new(HashMap::new())),
-        }
+        })
     }
     
     pub async fn new_async() -> crate::error::Result<Self> {
@@ -503,7 +504,7 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
         Ok(Response::new(response))
     }
 
-    type StreamExecuteCodeStream = Pin<Box<dyn Stream<Item = Result<ExecuteCodeStreamResponse, Status>> + Send>>;
+    type StreamExecuteCodeStream = std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<ExecuteCodeStreamResponse, Status>> + Send>>;
 
     async fn stream_execute_code(
         &self,
@@ -630,7 +631,7 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
         Ok(Response::new(response))
     }
 
-    type DownloadFileStream = Pin<Box<dyn Stream<Item = Result<DownloadFileResponse, Status>> + Send>>;
+    type DownloadFileStream = std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<DownloadFileResponse, Status>> + Send>>;
 
     async fn download_file(
         &self,

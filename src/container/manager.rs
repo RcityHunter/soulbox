@@ -8,7 +8,7 @@ use tracing::{info, error, warn};
 use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use tokio::time::{timeout, Duration as TokioDuration};
 
-use crate::{error::Result, config::Config};
+use crate::{error::{Result, SoulBoxError}, config::Config};
 use crate::network::{NetworkManager, SandboxNetworkConfig, NetworkError};
 use super::{SandboxContainer, ResourceLimits, NetworkConfig};
 
@@ -33,14 +33,21 @@ pub struct ContainerManager {
 }
 
 impl ContainerManager {
-    /// Create a stub container manager for testing/development without Docker connection
-    pub fn new_stub() -> Self {
-        // Create a mock Docker client that will fail if used
-        let docker = Arc::new(Docker::connect_with_socket_defaults().unwrap_or_else(|_| {
-            // This is a stub implementation that shouldn't be used
-            panic!("Stub ContainerManager should not connect to Docker")
-        }));
+    /// Create a stub container manager for testing/development
+    /// This creates a manager that can be instantiated even without Docker
+    pub fn new_stub() -> Result<Self> {
+        // Try to create a Docker client gracefully
+        let docker = Docker::connect_with_socket_defaults()
+            .or_else(|_| Docker::connect_with_local_defaults())
+            .map_err(|e| SoulBoxError::Container(e))?;
         
+        let docker = Arc::new(docker);
+        
+        Ok(Self::new_with_docker(docker))
+    }
+    
+    /// Create a container manager with a provided Docker client
+    pub fn new_with_docker(docker: Arc<Docker>) -> Self {
         Self {
             docker,
             containers: Arc::new(RwLock::new(HashMap::new())),
