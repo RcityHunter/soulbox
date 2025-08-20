@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 // Temporarily use mock types
 pub use crate::soulbox::v1::*;
+use crate::soulbox::v1::{TerminalStreamResponse, TerminalStreamRequest, SandboxStreamResponse, SandboxStreamRequest};
 
 #[derive(Debug)]
 pub struct StreamingServiceImpl {

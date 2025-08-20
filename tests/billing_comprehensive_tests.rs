@@ -345,7 +345,7 @@ mod data_integrity_tests {
         };
         
         // Average should be total / count
-        let expected_average = aggregated.total / Decimal::new(aggregated.count, 0);
+        let expected_average = aggregated.total / Decimal::new(aggregated.count as i64, 0);
         assert_eq!(aggregated.average, expected_average);
         
         // Maximum should be >= average >= minimum

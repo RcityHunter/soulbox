@@ -52,7 +52,7 @@ fn arb_pricing_tier() -> impl Strategy<Value = PricingTier> {
 fn arb_aggregated_metric() -> impl Strategy<Value = AggregatedMetric> {
     (arb_small_decimal(), 1u64..=1000)
         .prop_map(|(total, count)| {
-            let average = total / Decimal::new(count, 0);
+            let average = total / Decimal::new(count as i64, 0);
             AggregatedMetric {
                 total,
                 average,
@@ -470,7 +470,7 @@ proptest! {
             user_id: Uuid::new_v4(),
             pricing_tier,
             is_first_billing,
-            total_previous_usage: arb_decimal_amount().new_tree(&mut Default::default()).unwrap().current(),
+            total_previous_usage: Decimal::new(1000, 2), // Fixed test value: $10.00
             applicable_discounts: discounts.clone(),
             custom_rates: None,
         };

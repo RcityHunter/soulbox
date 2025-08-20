@@ -2,7 +2,7 @@
 //! 
 //! These tests verify the integration and functionality of the billing system components.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Timelike};
 use rust_decimal::Decimal;
 use soulbox::billing::{
     BillingConfig, BillingService, CostCalculator, 
@@ -256,12 +256,12 @@ fn test_discount_calculations() {
     // Test percentage discount
     let percentage_discount = DiscountType::Percentage(Decimal::new(20, 0)); // 20%
     let discount_amount = percentage_discount.calculate_discount(subtotal);
-    assert_eq!(discount_amount, Decimal::new(2000, 2)); // $20.00
+    assert_eq!(discount_amount, Ok(Decimal::new(2000, 2))); // $20.00
     
     // Test fixed amount discount
     let fixed_discount = DiscountType::FixedAmount(Decimal::new(1500, 2)); // $15.00
     let discount_amount = fixed_discount.calculate_discount(subtotal);
-    assert_eq!(discount_amount, Decimal::new(1500, 2)); // $15.00
+    assert_eq!(discount_amount, Ok(Decimal::new(1500, 2))); // $15.00
     
     // Test volume discount (threshold met)
     let volume_discount = DiscountType::Volume(
@@ -269,7 +269,7 @@ fn test_discount_calculations() {
         Decimal::new(10, 0)    // 10% discount
     );
     let discount_amount = volume_discount.calculate_discount(subtotal);
-    assert_eq!(discount_amount, Decimal::new(1000, 2)); // $10.00
+    assert_eq!(discount_amount, Ok(Decimal::new(1000, 2))); // $10.00
     
     // Test volume discount (threshold not met)
     let volume_discount_high = DiscountType::Volume(
@@ -277,12 +277,12 @@ fn test_discount_calculations() {
         Decimal::new(10, 0)     // 10% discount
     );
     let discount_amount = volume_discount_high.calculate_discount(subtotal);
-    assert_eq!(discount_amount, Decimal::ZERO);
+    assert_eq!(discount_amount, Ok(Decimal::ZERO));
     
     // Test first-time discount
     let first_time_discount = DiscountType::FirstTime(Decimal::new(25, 0)); // 25%
     let discount_amount = first_time_discount.calculate_discount(subtotal);
-    assert_eq!(discount_amount, Decimal::new(2500, 2)); // $25.00
+    assert_eq!(discount_amount, Ok(Decimal::new(2500, 2))); // $25.00
 }
 
 /// Test promotional discount with expiry
@@ -296,7 +296,7 @@ fn test_promotional_discount_expiry() {
         expires_at: Utc::now() + chrono::Duration::days(7), // Expires in 7 days
     };
     let discount_amount = active_promo.calculate_discount(subtotal);
-    assert_eq!(discount_amount, Decimal::new(3000, 2)); // $30.00
+    assert_eq!(discount_amount, Ok(Decimal::new(3000, 2))); // $30.00
     
     // Expired promotional discount
     let expired_promo = DiscountType::Promotional {
@@ -304,7 +304,7 @@ fn test_promotional_discount_expiry() {
         expires_at: Utc::now() - chrono::Duration::days(1), // Expired yesterday
     };
     let discount_amount = expired_promo.calculate_discount(subtotal);
-    assert_eq!(discount_amount, Decimal::ZERO);
+    assert_eq!(discount_amount, Ok(Decimal::ZERO));
 }
 
 /// Test cost calculation with user billing context

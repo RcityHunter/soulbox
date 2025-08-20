@@ -432,7 +432,7 @@ mod injection_tests {
                 free_allowance: Decimal::ZERO,
                 billable_usage: Decimal::new(100, 0),
                 cost: Decimal::new(10, 2),
-                description: description.clone(),
+                description: description.to_string(),
             };
             
             // Description should be stored as-is
