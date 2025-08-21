@@ -353,7 +353,7 @@ mod data_integrity_tests {
         assert!(aggregated.average >= aggregated.minimum);
         
         // Total should be reasonable given average and count
-        let total_from_average = aggregated.average * Decimal::new(aggregated.count, 0);
+        let total_from_average = aggregated.average * Decimal::new(aggregated.count as i64, 0);
         assert_eq!(aggregated.total, total_from_average);
     }
     
@@ -552,7 +552,7 @@ mod security_tests {
             "<script>alert('xss')</script>",
             "../../etc/passwd",
             "\x00\x01\x02", // Binary data
-            "a".repeat(10000), // Very long string
+            &"a".repeat(10000), // Very long string
         ];
         
         for malicious_name in malicious_names {

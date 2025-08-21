@@ -20,7 +20,7 @@ use crate::auth::{
 use crate::error::SoulBoxError;
 
 /// 登录请求
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
@@ -360,7 +360,7 @@ mod tests {
             "test-secret-key",
             "soulbox".to_string(),
             "soulbox-api".to_string(),
-        ));
+        ).unwrap());
         let api_key_manager = Arc::new(ApiKeyManager::new("sk".to_string()));
         
         AuthState::new(jwt_manager, api_key_manager)
