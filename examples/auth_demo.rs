@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "demo-secret-key-do-not-use-in-production",
         "soulbox".to_string(),
         "soulbox-api".to_string(),
-    );
+    )?;
 
     // 创建测试用户
     let user = User {

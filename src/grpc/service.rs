@@ -19,9 +19,9 @@ use crate::sandbox::{SandboxRuntime, SandboxInstance};
 // Note: The generated code will be in src/soulbox.v1.rs after build  
 pub use crate::soulbox::v1::*;
 use crate::soulbox::v1::soul_box_service_server;
-use crate::soulbox::v1::{execute_code_stream_response, download_file_response};
+use crate::soulbox::v1::{execute_code_stream_response, download_file_response, upload_file_request};
 use crate::soulbox::v1::{ExecutionStarted, ExecutionOutput, ExecutionCompleted, OutputType};
-use crate::soulbox::v1::{FileDownloadMetadata};
+use crate::soulbox::v1::{FileDownloadMetadata, HealthStatus};
 
 // Real sandbox representation using container management
 #[derive(Debug, Clone)]

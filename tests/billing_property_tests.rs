@@ -468,7 +468,7 @@ proptest! {
     ) {
         let context = UserBillingContext {
             user_id: Uuid::new_v4(),
-            pricing_tier,
+            pricing_tier: pricing_tier.clone(),
             is_first_billing,
             total_previous_usage: Decimal::new(1000, 2), // Fixed test value: $10.00
             applicable_discounts: discounts.clone(),

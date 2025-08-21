@@ -17,7 +17,7 @@ use uuid::Uuid;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
-    tracing_subscriber::init();
+    tracing_subscriber::fmt::init();
     
     println!("🔧 SoulBox Billing System - Security Fixes Demo");
     println!("================================================");
@@ -87,18 +87,20 @@ async fn demonstrate_error_handling() -> Result<(), Box<dyn std::error::Error>> 
     let recovery_service = Arc::new(ErrorRecoveryService::new(RetryConfig::default()));
     
     // Simulate an operation that fails initially but succeeds on retry
-    let mut attempt_count = 0;
-    let result = recovery_service.execute_with_recovery("demo_operation", || {
-        attempt_count += 1;
-        if attempt_count < 3 {
-            Err("temporary network error")
+    let attempt_count = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let attempt_count_clone = Arc::clone(&attempt_count);
+    let result = recovery_service.execute_with_recovery("demo_operation", move || {
+        let count = attempt_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        if count < 3 {
+            Err(anyhow::anyhow!("temporary network error"))
         } else {
             Ok("success")
         }
     }).await;
     
+    let final_count = attempt_count.load(std::sync::atomic::Ordering::SeqCst);
     match result {
-        Ok(value) => println!("Operation succeeded after {} attempts: {}", attempt_count, value),
+        Ok(value) => println!("Operation succeeded after {} attempts: {}", final_count, value),
         Err(e) => println!("Operation failed: {}", e),
     }
     

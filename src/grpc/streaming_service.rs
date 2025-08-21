@@ -20,8 +20,8 @@ pub use crate::soulbox::v1::*;
 use crate::soulbox::v1::{TerminalStreamResponse, TerminalStreamRequest, SandboxStreamResponse, SandboxStreamRequest, StreamType, OutputType};
 use crate::soulbox::v1::streaming_service_server;
 use crate::soulbox::v1::{sandbox_stream_response, sandbox_stream_request, terminal_stream_response, terminal_stream_request};
-use crate::soulbox::v1::{SandboxStreamOutput, SandboxStreamReady, SandboxStreamError, SandboxStreamCompleted};
-use crate::soulbox::v1::{TerminalStreamOutput, TerminalStreamInitialized, TerminalStreamExit};
+use crate::soulbox::v1::{SandboxStreamOutput, SandboxStreamReady, SandboxStreamError, SandboxStreamClosed};
+use crate::soulbox::v1::{TerminalStreamReady, TerminalStreamError, TerminalStreamClosed};
 
 #[derive(Debug)]
 pub struct StreamingServiceImpl {

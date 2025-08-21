@@ -419,7 +419,7 @@ mod tests {
         let breaker = CircuitBreaker::new(2, Duration::from_millis(100));
         
         // First failure
-        let result1 = breaker.call(|| -> Result<(), &str> { Err("test error") }).await;
+        let result1 = breaker.call(|| -> Result<(), anyhow::Error> { Err(anyhow::anyhow!("test error")) }).await;
         assert!(result1.is_err());
         
         // Second failure should open circuit
