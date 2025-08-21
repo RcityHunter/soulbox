@@ -125,7 +125,7 @@ where
         .route("/auth/profile", get(get_profile))
         .route("/auth/api-keys", get(list_api_keys))
         .route("/auth/api-keys", post(create_api_key))
-        .route("/auth/api-keys/:id", axum::routing::delete(revoke_api_key))
+        .route("/auth/api-keys/{id}", axum::routing::delete(revoke_api_key))
         .with_state(auth_state)
 }
 

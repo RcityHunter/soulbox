@@ -74,15 +74,15 @@ pub fn template_routes() -> Router<crate::server::AppState> {
     Router::new()
         // Public routes
         .route("/templates/public", get(list_public_templates))
-        .route("/templates/:id_or_slug", get(get_template))
+        .route("/templates/{id_or_slug}", get(get_template))
         
         // Authenticated routes
         .route("/templates", post(create_template))
         .route("/templates/my", get(list_my_templates))
-        .route("/templates/:id", put(update_template))
-        .route("/templates/:id", delete(delete_template))
-        .route("/templates/:id/clone", post(clone_template))
-        .route("/templates/:id/validate", post(validate_template))
+        .route("/templates/{id}", put(update_template))
+        .route("/templates/{id}", delete(delete_template))
+        .route("/templates/{id}/clone", post(clone_template))
+        .route("/templates/{id}/validate", post(validate_template))
 }
 
 /// List public templates

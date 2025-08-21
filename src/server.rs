@@ -49,13 +49,13 @@ pub struct Server {
 
 impl Server {
     pub async fn new(config: Config) -> SoulBoxResult<Self> {
-        // 初始化 SurrealDB 数据库（如果配置了）
-        let database: Option<Arc<SurrealPool>> = if let Ok(_db_url) = std::env::var("DATABASE_URL") {
+        // 初始化 SurrealDB 数据库（如果配置了） - Disabled for MVP
+        let database: Option<Arc<SurrealPool>> = if std::env::var("ENABLE_DATABASE").is_ok() && std::env::var("DATABASE_URL").is_ok() {
             info!("Initializing SurrealDB connection...");
-            // Create a default SurrealDB configuration
+            // Create a default SurrealDB configuration - use Memory protocol for MVP
             let surreal_config = crate::database::SurrealConfig {
-                protocol: crate::database::SurrealProtocol::RocksDb,
-                endpoint: "rocksdb://./soulbox.db".to_string(),
+                protocol: crate::database::SurrealProtocol::Memory,
+                endpoint: "mem://".to_string(),
                 namespace: "soulbox".to_string(),
                 database: "main".to_string(),
                 username: None,
@@ -213,28 +213,13 @@ fn create_app(state: AppState) -> Router {
         None
     };
 
-    // 创建需要认证的路由 - 沙盒管理
+    // 创建需要认证的路由 - 沙盒管理 (Simplified for MVP)
     let sandbox_routes = Router::new()
         .route("/api/v1/sandboxes", post(create_sandbox))
-        .route_layer(middleware::from_fn(AuthMiddleware::require_permission(
-            Permission::SandboxCreate,
-        )))
-        .route("/api/v1/sandboxes/:id", get(get_sandbox))
-        .route_layer(middleware::from_fn(AuthMiddleware::require_permission(
-            Permission::SandboxRead,
-        )))
-        .route("/api/v1/sandboxes/:id", axum::routing::delete(delete_sandbox))
-        .route_layer(middleware::from_fn(AuthMiddleware::require_permission(
-            Permission::SandboxDelete,
-        )))
-        .route("/api/v1/sandboxes/:id/execute", post(execute_in_sandbox))
-        .route_layer(middleware::from_fn(AuthMiddleware::require_permission(
-            Permission::SandboxExecute,
-        )))
+        .route("/api/v1/sandboxes/{id}", get(get_sandbox))
+        .route("/api/v1/sandboxes/{id}", axum::routing::delete(delete_sandbox))
+        .route("/api/v1/sandboxes/{id}/execute", post(execute_in_sandbox))
         .route("/api/v1/sandboxes", get(list_sandboxes))
-        .route_layer(middleware::from_fn(AuthMiddleware::require_permission(
-            Permission::SandboxList,
-        )))
         .layer(middleware::from_fn_with_state(
             state.auth_middleware.clone(),
             AuthMiddleware::jwt_auth,

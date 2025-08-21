@@ -18,10 +18,12 @@ use uuid::Uuid;
 // Temporarily use mock types
 pub use crate::soulbox::v1::*;
 use crate::soulbox::v1::{TerminalStreamResponse, TerminalStreamRequest, SandboxStreamResponse, SandboxStreamRequest, StreamType, OutputType};
-use crate::soulbox::v1::streaming_service_server;
+// Note: Service server traits will be manually implemented since tonic-build is not fully configured yet
+// use crate::soulbox::v1::streaming_service_server;
 use crate::soulbox::v1::{sandbox_stream_response, sandbox_stream_request, terminal_stream_response, terminal_stream_request};
-use crate::soulbox::v1::{SandboxStreamOutput, SandboxStreamReady, SandboxStreamError, SandboxStreamClosed};
-use crate::soulbox::v1::{TerminalStreamReady, TerminalStreamError, TerminalStreamClosed};
+use crate::soulbox::v1::{SandboxStreamOutput, SandboxStreamReady, SandboxStreamError};
+// Note: Some types like SandboxStreamClosed, TerminalStreamReady etc. are in different nested modules in the generated code
+// use crate::soulbox::v1::{TerminalStreamReady, TerminalStreamError, TerminalStreamClosed};
 
 #[derive(Debug)]
 pub struct StreamingServiceImpl {

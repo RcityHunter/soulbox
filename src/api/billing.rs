@@ -105,12 +105,12 @@ pub fn create_billing_routes() -> Router<BillingApiState> {
         .route("/usage", get(get_usage_summary)) // TODO: Re-enable .post(record_usage) after fixing handler
         .route("/usage/realtime", get(get_realtime_usage))
         .route("/usage/realtime/stream", get(realtime_usage_stream))
-        .route("/usage/sessions/:session_id", get(get_session_usage))
+        .route("/usage/sessions/{session_id}", get(get_session_usage))
         .route("/billing/records", get(get_billing_records))
-        .route("/billing/records/:record_id", get(get_billing_record))
+        .route("/billing/records/{record_id}", get(get_billing_record))
         // .route("/billing/estimate", post(estimate_cost)) // TODO: Fix handler
         .route("/invoices", get(get_user_invoices))
-        .route("/invoices/:invoice_id", get(get_invoice))
+        .route("/invoices/{invoice_id}", get(get_invoice))
         // .route("/invoices/:invoice_id/status", post(update_invoice_status)) // TODO: Fix handler
         .route("/metrics/realtime", get(realtime_metrics_stream))
 }

@@ -66,9 +66,9 @@ impl SimpleAPI {
             .route("/health", get(health_check))
             .route("/sandboxes", post(create_sandbox))
             .route("/sandboxes", get(list_sandboxes))
-            .route("/sandboxes/:id", get(get_sandbox))
-            .route("/sandboxes/:id", delete(remove_sandbox))
-            .route("/sandboxes/:id/execute", post(execute_code))
+            .route("/sandboxes/{id}", get(get_sandbox))
+            .route("/sandboxes/{id}", delete(remove_sandbox))
+            .route("/sandboxes/{id}/execute", post(execute_code))
             .route("/languages", get(list_languages))
     }
 

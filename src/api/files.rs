@@ -358,21 +358,21 @@ pub async fn get_filesystem_stats(
 pub fn file_routes() -> Router<AppState> {
     Router::new()
         // File operations
-        .route("/sandboxes/:sandbox_id/files/upload", post(upload_file))
-        .route("/sandboxes/:sandbox_id/files/*file_path", get(download_file))
-        .route("/sandboxes/:sandbox_id/files/*file_path", delete(delete_file))
+        .route("/sandboxes/{sandbox_id}/files/upload", post(upload_file))
+        .route("/sandboxes/{sandbox_id}/files/{*file_path}", get(download_file))
+        .route("/sandboxes/{sandbox_id}/files/{*file_path}", delete(delete_file))
         
         // Directory operations
-        .route("/sandboxes/:sandbox_id/directories", post(create_directory))
+        .route("/sandboxes/{sandbox_id}/directories", post(create_directory))
         // .route("/sandboxes/:sandbox_id/directories/:dir_path", get(list_directory_handler)) // TODO: Fix handler
         
         // Metadata and permissions
         // .route("/sandboxes/:sandbox_id/metadata/:file_path", get(get_file_metadata)) // TODO: Fix handler
-        .route("/sandboxes/:sandbox_id/permissions/*file_path", put(set_permissions))
+        .route("/sandboxes/{sandbox_id}/permissions/{*file_path}", put(set_permissions))
         
         // Advanced operations
-        .route("/sandboxes/:sandbox_id/symlinks", post(create_symlink))
-        .route("/sandboxes/:sandbox_id/stats", get(get_filesystem_stats))
+        .route("/sandboxes/{sandbox_id}/symlinks", post(create_symlink))
+        .route("/sandboxes/{sandbox_id}/stats", get(get_filesystem_stats))
 }
 
 /// Validate file path for security and correctness
