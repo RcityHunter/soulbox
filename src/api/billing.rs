@@ -4,7 +4,7 @@
 //! It includes endpoints for retrieving usage statistics, real-time metrics, and billing records.
 
 use crate::billing::{BillingService, models::*};
-use crate::billing::models::{MetricType, InvoiceStatus};
+use crate::billing::models::{MetricType, InvoiceStatus, PricingTier};
 use crate::auth::middleware::{AuthContext, AuthExtractor};
 use crate::error::{SoulBoxError, Result};
 use axum::{

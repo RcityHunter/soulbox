@@ -7,7 +7,7 @@
 use super::models::{UsageMetric, UsageSummary, AggregatedMetric, MetricType};
 use super::BillingConfig;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc, Duration, DurationRound, Datelike};
+use chrono::{DateTime, Utc, Duration, DurationRound, Datelike, Timelike};
 use redis::{Client, AsyncCommands};
 use rust_decimal::Decimal;
 use std::collections::HashMap;

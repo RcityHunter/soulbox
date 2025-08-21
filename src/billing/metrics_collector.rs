@@ -6,7 +6,7 @@
 use super::models::{UsageMetric, MetricType, BillingMetrics};
 use super::BillingConfig;
 use anyhow::{Context, Result};
-use chrono::Utc;
+use chrono::{Utc, Timelike};
 use redis::{Client, AsyncCommands, streams::StreamReadOptions};
 use rust_decimal::Decimal;
 use serde_json;

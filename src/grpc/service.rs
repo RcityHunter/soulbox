@@ -18,6 +18,10 @@ use crate::sandbox::{SandboxRuntime, SandboxInstance};
 // Import generated protobuf types
 // Note: The generated code will be in src/soulbox.v1.rs after build  
 pub use crate::soulbox::v1::*;
+use crate::soulbox::v1::soul_box_service_server;
+use crate::soulbox::v1::{execute_code_stream_response, download_file_response};
+use crate::soulbox::v1::{ExecutionStarted, ExecutionOutput, ExecutionCompleted, OutputType};
+use crate::soulbox::v1::{FileDownloadMetadata};
 
 // Real sandbox representation using container management
 #[derive(Debug, Clone)]
