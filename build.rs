@@ -1,9 +1,13 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=proto/soulbox.proto");
     
-    // Temporarily use mock protobuf generation to ensure compilation success
-    // TODO: Properly configure tonic-build 0.14 for full gRPC functionality
-    // The main goal is to restore module availability, not generate full gRPC code
+    // For now, keep the basic protobuf generation working
+    // and improve mock implementation to be more comprehensive
     
+    // Generate with basic prost only for now
+    prost_build::compile_protos(&["proto/soulbox.proto"], &["proto"])?;
+    
+    println!("Generated basic protobuf code from proto/soulbox.proto");
+    println!("Note: Using enhanced mock implementation for gRPC services");
     Ok(())
 }

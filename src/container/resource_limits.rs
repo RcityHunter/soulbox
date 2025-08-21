@@ -12,12 +12,14 @@ pub struct ResourceLimits {
 pub struct CpuLimits {
     pub cores: f64,
     pub shares: Option<u64>,
+    pub cpu_percent: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryLimits {
     pub limit_mb: u64,
     pub swap_limit_mb: Option<u64>,
+    pub swap_mb: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,10 +44,12 @@ impl Default for ResourceLimits {
             cpu: CpuLimits {
                 cores: 1.0,
                 shares: Some(1024),
+                cpu_percent: Some(80.0),
             },
             memory: MemoryLimits {
                 limit_mb: 512,
                 swap_limit_mb: Some(1024),
+                swap_mb: Some(512),
             },
             disk: DiskLimits {
                 limit_mb: 2048,

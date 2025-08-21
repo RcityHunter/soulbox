@@ -522,7 +522,7 @@ fn test_cost_calculation_performance() {
     });
     
     metrics.insert(MetricType::NetworkIngress, AggregatedMetric {
-        total: Decimal::new(10000000000_u64, 0), // 10GB
+        total: Decimal::new(10000000000_u64 as i64, 0), // 10GB
         average: Decimal::new(416666667, 0),
         maximum: Decimal::new(1000000000, 0),
         minimum: Decimal::new(100000000, 0),
@@ -530,7 +530,7 @@ fn test_cost_calculation_performance() {
     });
     
     metrics.insert(MetricType::NetworkEgress, AggregatedMetric {
-        total: Decimal::new(5000000000_u64, 0), // 5GB
+        total: Decimal::new(5000000000_u64 as i64, 0), // 5GB
         average: Decimal::new(208333333, 0),
         maximum: Decimal::new(500000000, 0),
         minimum: Decimal::new(50000000, 0),

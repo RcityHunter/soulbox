@@ -40,8 +40,6 @@ pub struct SoulBoxServiceImpl {
     container_manager: Arc<ContainerManager>,
     sandboxes: Arc<Mutex<HashMap<String, SandboxInfo>>>, // sandbox metadata
     executions: Arc<Mutex<HashMap<String, String>>>, // execution_id -> sandbox_id
-    runtime: Arc<Mutex<Option<Arc<dyn SandboxRuntime>>>>,
-    sandbox_instances: Arc<Mutex<HashMap<String, Arc<dyn crate::sandbox::SandboxInstance>>>>,
 }
 
 impl SoulBoxServiceImpl {
@@ -51,8 +49,6 @@ impl SoulBoxServiceImpl {
             container_manager,
             sandboxes: Arc::new(Mutex::new(HashMap::new())),
             executions: Arc::new(Mutex::new(HashMap::new())),
-            runtime: Arc::new(Mutex::new(None)),
-            sandbox_instances: Arc::new(Mutex::new(HashMap::new())),
         })
     }
     
@@ -65,8 +61,6 @@ impl SoulBoxServiceImpl {
             container_manager,
             sandboxes: Arc::new(Mutex::new(HashMap::new())),
             executions: Arc::new(Mutex::new(HashMap::new())),
-            runtime: Arc::new(Mutex::new(None)),
-            sandbox_instances: Arc::new(Mutex::new(HashMap::new())),
         })
     }
     
@@ -77,14 +71,7 @@ impl SoulBoxServiceImpl {
             container_manager,
             sandboxes: Arc::new(Mutex::new(HashMap::new())),
             executions: Arc::new(Mutex::new(HashMap::new())),
-            runtime: Arc::new(Mutex::new(None)),
-            sandbox_instances: Arc::new(Mutex::new(HashMap::new())),
         })
-    }
-
-    pub async fn set_runtime(&self, runtime: Arc<dyn SandboxRuntime>) {
-        let mut runtime_lock = self.runtime.lock().await;
-        *runtime_lock = Some(runtime);
     }
 
 }
@@ -103,10 +90,7 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
             return Err(Status::invalid_argument("Template ID is required"));
         }
 
-        // Get runtime
-        let runtime_lock = self.runtime.lock().await;
-        let runtime = runtime_lock.as_ref()
-            .ok_or_else(|| Status::internal("Runtime not initialized"))?;
+        // No runtime needed, using container manager directly
 
         // Generate sandbox ID
         let sandbox_id = format!("sb_{}", Uuid::new_v4().to_string().replace("-", "")[..8].to_lowercase());
@@ -128,10 +112,12 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
             memory: MemoryLimits {
                 limit_mb: memory_limit,
                 swap_limit_mb: Some(memory_limit * 2),
+                swap_mb: Some(memory_limit / 2),
             },
             cpu: CpuLimits {
                 cores: cpu_limit,
                 shares: Some(1024),
+                cpu_percent: Some(80.0),
             },
             disk: DiskLimits {
                 limit_mb: 2048,
@@ -155,19 +141,27 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
             dns_servers: vec!["8.8.8.8".to_string(), "1.1.1.1".to_string()],
         };
 
-        // Create sandbox using runtime
-        match runtime.create_sandbox(
+        // Create sandbox using real container manager
+        let docker_image = match req.template_id.as_str() {
+            "python-3.11" | "python" => "python:3.11-slim",
+            "node-18" | "javascript" | "node" => "node:18-alpine",
+            "rust" => "rust:1.70-slim",
+            "go" => "golang:1.20-alpine",
+            _ => "ubuntu:22.04", // Default fallback
+        };
+
+        match self.container_manager.create_sandbox_container(
             &sandbox_id,
-            &req.template_id,
+            docker_image,
             resource_limits,
             network_config,
             req.environment_variables.clone(),
         ).await {
-            Ok(sandbox_instance) => {
-                // Start the sandbox
-                if let Err(e) = sandbox_instance.start().await {
-                    error!("Failed to start sandbox {}: {}", sandbox_id, e);
-                    return Err(Status::internal("Failed to start sandbox"));
+            Ok(container) => {
+                // Start the container
+                if let Err(e) = container.start().await {
+                    error!("Failed to start container for sandbox {}: {}", sandbox_id, e);
+                    return Err(Status::internal("Failed to start sandbox container"));
                 }
 
                 // Create real sandbox info for tracking
@@ -195,9 +189,7 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
                 sandboxes.insert(sandbox_id.clone(), sandbox_info.clone());
                 drop(sandboxes);
                 
-                // Store sandbox instance
-                let mut instances = self.sandbox_instances.lock().await;
-                instances.insert(sandbox_id.clone(), sandbox_instance);
+                // Container is now managed by ContainerManager, no need to store separately
 
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -318,14 +310,7 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
             Ok(_) => {
                 info!("Deleted sandbox and container: {}", req.sandbox_id);
                 
-                // Also remove from sandbox instances if it exists
-                let mut instances = self.sandbox_instances.lock().await;
-                if let Some(instance) = instances.remove(&req.sandbox_id) {
-                    // Attempt to stop the sandbox instance
-                    if let Err(e) = instance.stop().await {
-                        warn!("Failed to stop sandbox instance {}: {}", req.sandbox_id, e);
-                    }
-                }
+                // Container is managed by ContainerManager, already removed above
                 
                 Ok(Response::new(DeleteSandboxResponse {
                     success: true,
@@ -388,12 +373,7 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
         executions.insert(execution_id.clone(), req.sandbox_id.clone());
         drop(executions);
 
-        // Get the sandbox instance
-        let instances = self.sandbox_instances.lock().await;
-        let instance = instances.get(&req.sandbox_id)
-            .ok_or_else(|| Status::not_found("Sandbox instance not found"))?
-            .clone();
-        drop(instances);
+        // No need to get sandbox instance, we use container directly
 
         // Create secure execution command - use proper file creation instead of echo
         let start_time = std::time::Instant::now();
@@ -469,14 +449,23 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
             }
         };
 
-        // Execute the code in the sandbox with timeout
-        let execution_result = tokio::time::timeout(
-            std::time::Duration::from_secs(30), // 30 second timeout
-            instance.execute_command(command)
-        ).await;
+        // Execute the code in the sandbox with timeout using real container
+        let execution_result = if let Some(container) = self.container_manager.get_container(&req.sandbox_id).await {
+            // Use the real container execute_command method
+            info!("Executing command in real container: {:?}", command);
+            tokio::time::timeout(
+                std::time::Duration::from_secs(30), // 30 second timeout
+                container.execute_command(command)
+            ).await
+        } else {
+            return Err(Status::not_found("Container not found for sandbox"));
+        };
 
         let (stdout, stderr, exit_code, timed_out) = match execution_result {
-            Ok(Ok((out, err, code))) => (out, err, code, false),
+            Ok(Ok(exec_result)) => {
+                // Handle ExecutionResult from real container
+                (exec_result.stdout, exec_result.stderr, exec_result.exit_code, false)
+            },
             Ok(Err(e)) => {
                 error!("Code execution failed: {}", e);
                 (String::new(), format!("Execution error: {}", e), 1, false)

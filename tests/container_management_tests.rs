@@ -19,10 +19,12 @@ async fn test_container_creation_should_succeed() {
         cpu: CpuLimits {
             cores: 1.0,
             shares: Some(1024),
+            cpu_percent: Some(80.0),
         },
         memory: MemoryLimits {
             limit_mb: 512,
             swap_limit_mb: Some(1024),
+            swap_mb: Some(512),
         },
         disk: DiskLimits {
             limit_mb: 2048,
@@ -107,10 +109,12 @@ async fn test_resource_limits_enforcement() {
         cpu: CpuLimits {
             cores: 0.5, // Half a CPU core
             shares: Some(512),
+            cpu_percent: Some(50.0),
         },
         memory: MemoryLimits {
             limit_mb: 128, // Very low memory
             swap_limit_mb: Some(256),
+            swap_mb: Some(128),
         },
         disk: DiskLimits {
             limit_mb: 512, // Limited disk space

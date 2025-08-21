@@ -23,7 +23,7 @@ pub struct RecoveryContext {
 }
 
 /// Actions to take during session recovery
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RecoveryAction {
     /// Restart the container
     RestartContainer,
@@ -481,7 +481,7 @@ mod tests {
     #[tokio::test]
     async fn test_recovery_context_creation() {
         let session_manager = Box::new(InMemorySessionManager::new());
-        let container_manager = Box::new(MockContainerManager::new());
+        let container_manager = Box::new(ContainerManager::new(crate::config::Config::default()).await.unwrap());
         let recovery_service = SessionRecoveryService::new(session_manager, container_manager);
         
         let session = Session::new("user123".to_string());
@@ -495,7 +495,7 @@ mod tests {
     #[tokio::test]
     async fn test_expired_session_recovery() {
         let session_manager = Box::new(InMemorySessionManager::new());
-        let container_manager = Box::new(MockContainerManager::new());
+        let container_manager = Box::new(ContainerManager::new(crate::config::Config::default()).await.unwrap());
         let recovery_service = SessionRecoveryService::new(session_manager, container_manager);
         
         let mut session = Session::new("user123".to_string());

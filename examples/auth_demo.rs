@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   刷新令牌: {}...", &refresh_token[..50]);
 
     // 验证令牌
-    let claims = jwt_manager.validate_access_token(&access_token)?;
+    let claims = jwt_manager.validate_access_token(&access_token).await?;
     println!("\n✅ 令牌验证成功:");
     println!("   用户ID: {}", claims.sub);
     println!("   用户名: {}", claims.username);

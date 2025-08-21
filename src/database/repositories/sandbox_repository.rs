@@ -5,8 +5,7 @@ use tracing::{info, error, debug};
 use uuid::Uuid;
 
 use crate::database::surrealdb::{
-    SurrealPool, SurrealOperations, 
-    uuid_to_record_id, record_id_to_uuid, SurrealResult, SurrealConnectionError, PaginationResult
+    SurrealPool, uuid_to_record_id
 };
 use crate::database::{DatabaseError, DatabaseResult, models::{DbSandbox, PaginatedResult}};
 
@@ -51,8 +50,6 @@ impl SandboxRepository {
         let conn = self.pool.get_connection().await
             .map_err(|e| DatabaseError::Connection(e.to_string()))?;
         
-        let ops = SurrealOperations::new(&conn);
-        
         let surreal_sandbox = SurrealSandbox {
             id: uuid_to_record_id("sandboxes", sandbox.id),
             name: sandbox.name.clone(),
@@ -75,8 +72,15 @@ impl SandboxRepository {
             expires_at: sandbox.expires_at,
         };
         
-        ops.create("sandboxes", &surreal_sandbox).await
-            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        // Use direct SurrealQL CREATE query
+        let sql = "CREATE $record_id CONTENT $sandbox";
+        
+        conn.db()
+            .query(sql)
+            .bind(("record_id", &surreal_sandbox.id))
+            .bind(("sandbox", &surreal_sandbox))
+            .await
+            .map_err(|e| DatabaseError::Query(format!("创建沙盒失败: {}", e)))?;
         
         info!("Created sandbox: {} ({})", sandbox.name, sandbox.id);
         Ok(())
@@ -89,15 +93,26 @@ impl SandboxRepository {
         let conn = self.pool.get_connection().await
             .map_err(|e| DatabaseError::Connection(e.to_string()))?;
         
-        let ops = SurrealOperations::new(&conn);
+        let record_id = uuid_to_record_id("sandboxes", id);
         
-        match ops.find_by_id::<SurrealSandbox>("sandboxes", &id.to_string()).await {
-            Ok(Some(surreal_sandbox)) => {
-                let db_sandbox = self.surreal_to_db_sandbox(surreal_sandbox)?;
-                Ok(Some(db_sandbox))
-            }
-            Ok(None) => Ok(None),
-            Err(e) => Err(DatabaseError::Query(e.to_string())),
+        // Use direct SurrealQL SELECT query
+        let sql = "SELECT * FROM $record_id";
+        
+        let mut response = conn.db()
+            .query(sql)
+            .bind(("record_id", &record_id))
+            .await
+            .map_err(|e| DatabaseError::Query(format!("查询沙盒失败: {}", e)))?;
+        
+        let sandboxes: Vec<SurrealSandbox> = response
+            .take::<Vec<SurrealSandbox>>(0usize)
+            .map_err(|e| DatabaseError::Query(format!("解析查询结果失败: {}", e)))?;
+        
+        if let Some(surreal_sandbox) = sandboxes.into_iter().next() {
+            let db_sandbox = self.surreal_to_db_sandbox(surreal_sandbox)?;
+            Ok(Some(db_sandbox))
+        } else {
+            Ok(None)
         }
     }
     
@@ -108,21 +123,24 @@ impl SandboxRepository {
         let conn = self.pool.get_connection().await
             .map_err(|e| DatabaseError::Connection(e.to_string()))?;
         
-        let ops = SurrealOperations::new(&conn);
+        // Use direct SurrealQL SELECT query
+        let sql = "SELECT * FROM sandboxes WHERE container_id = $container_id";
         
-        let query = SurrealQueryBuilder::new("sandboxes")
-            .where_clause(format!("container_id = '{}'", container_id));
+        let mut response = conn.db()
+            .query(sql)
+            .bind(("container_id", container_id))
+            .await
+            .map_err(|e| DatabaseError::Query(format!("查询沙盒失败: {}", e)))?;
         
-        match ops.find_where::<SurrealSandbox>(query).await {
-            Ok(mut sandboxes) => {
-                if let Some(surreal_sandbox) = sandboxes.pop() {
-                    let db_sandbox = self.surreal_to_db_sandbox(surreal_sandbox)?;
-                    Ok(Some(db_sandbox))
-                } else {
-                    Ok(None)
-                }
-            }
-            Err(e) => Err(DatabaseError::Query(e.to_string())),
+        let sandboxes: Vec<SurrealSandbox> = response
+            .take::<Vec<SurrealSandbox>>(0usize)
+            .map_err(|e| DatabaseError::Query(format!("解析查询结果失败: {}", e)))?;
+        
+        if let Some(surreal_sandbox) = sandboxes.into_iter().next() {
+            let db_sandbox = self.surreal_to_db_sandbox(surreal_sandbox)?;
+            Ok(Some(db_sandbox))
+        } else {
+            Ok(None)
         }
     }
     
@@ -133,21 +151,24 @@ impl SandboxRepository {
         let conn = self.pool.get_connection().await
             .map_err(|e| DatabaseError::Connection(e.to_string()))?;
         
-        let ops = SurrealOperations::new(&conn);
+        // Use direct SurrealQL SELECT query
+        let sql = "SELECT * FROM sandboxes WHERE vm_id = $vm_id";
         
-        let query = SurrealQueryBuilder::new("sandboxes")
-            .where_clause(format!("vm_id = '{}'", vm_id));
+        let mut response = conn.db()
+            .query(sql)
+            .bind(("vm_id", vm_id))
+            .await
+            .map_err(|e| DatabaseError::Query(format!("查询沙盒失败: {}", e)))?;
         
-        match ops.find_where::<SurrealSandbox>(query).await {
-            Ok(mut sandboxes) => {
-                if let Some(surreal_sandbox) = sandboxes.pop() {
-                    let db_sandbox = self.surreal_to_db_sandbox(surreal_sandbox)?;
-                    Ok(Some(db_sandbox))
-                } else {
-                    Ok(None)
-                }
-            }
-            Err(e) => Err(DatabaseError::Query(e.to_string())),
+        let sandboxes: Vec<SurrealSandbox> = response
+            .take::<Vec<SurrealSandbox>>(0usize)
+            .map_err(|e| DatabaseError::Query(format!("解析查询结果失败: {}", e)))?;
+        
+        if let Some(surreal_sandbox) = sandboxes.into_iter().next() {
+            let db_sandbox = self.surreal_to_db_sandbox(surreal_sandbox)?;
+            Ok(Some(db_sandbox))
+        } else {
+            Ok(None)
         }
     }
     
@@ -158,61 +179,76 @@ impl SandboxRepository {
         let conn = self.pool.get_connection().await
             .map_err(|e| DatabaseError::Connection(e.to_string()))?;
         
-        let ops = SurrealOperations::new(&conn);
+        let record_id = uuid_to_record_id("sandboxes", sandbox.id);
         
-        let mut update = UpdateBuilder::new("sandboxes")
-            .set(format!("name = '{}'", sandbox.name))
-            .set(format!("runtime_type = '{}'", sandbox.runtime_type))
-            .set(format!("template = '{}'", sandbox.template))
-            .set(format!("status = '{}'", sandbox.status))
-            .set("updated_at = time::now()")
-            .where_clause(format!("id = {}", uuid_to_record_id("sandboxes", sandbox.id)));
+        // Use direct SurrealQL UPDATE query - build the update fields
+        let mut sql = format!(
+            "UPDATE $record_id SET name = $name, runtime_type = $runtime_type, template = $template, status = $status, updated_at = time::now()"
+        );
         
-        // 可选字段更新
+        // Add optional fields to the update
+        if sandbox.tenant_id.is_some() {
+            sql.push_str(", tenant_id = $tenant_id");
+        }
+        if sandbox.cpu_limit.is_some() {
+            sql.push_str(", cpu_limit = $cpu_limit");
+        }
+        if sandbox.memory_limit.is_some() {
+            sql.push_str(", memory_limit = $memory_limit");
+        }
+        if sandbox.disk_limit.is_some() {
+            sql.push_str(", disk_limit = $disk_limit");
+        }
+        if sandbox.container_id.is_some() {
+            sql.push_str(", container_id = $container_id");
+        }
+        if sandbox.vm_id.is_some() {
+            sql.push_str(", vm_id = $vm_id");
+        }
+        if sandbox.ip_address.is_some() {
+            sql.push_str(", ip_address = $ip_address");
+        }
+        
+        let mut query = conn.db()
+            .query(&sql)
+            .bind(("record_id", &record_id))
+            .bind(("name", &sandbox.name))
+            .bind(("runtime_type", &sandbox.runtime_type))
+            .bind(("template", &sandbox.template))
+            .bind(("status", &sandbox.status));
+        
+        // Bind optional fields
         if let Some(tenant_id) = sandbox.tenant_id {
-            update = update.set(format!("tenant_id = {}", uuid_to_record_id("tenants", tenant_id)));
+            let tenant_record_id = uuid_to_record_id("tenants", tenant_id);
+            query = query.bind(("tenant_id", tenant_record_id));
         }
-        
         if let Some(cpu_limit) = sandbox.cpu_limit {
-            update = update.set(format!("cpu_limit = {}", cpu_limit));
+            query = query.bind(("cpu_limit", cpu_limit));
         }
-        
         if let Some(memory_limit) = sandbox.memory_limit {
-            update = update.set(format!("memory_limit = {}", memory_limit));
+            query = query.bind(("memory_limit", memory_limit));
         }
-        
         if let Some(disk_limit) = sandbox.disk_limit {
-            update = update.set(format!("disk_limit = {}", disk_limit));
+            query = query.bind(("disk_limit", disk_limit));
         }
-        
         if let Some(ref container_id) = sandbox.container_id {
-            update = update.set(format!("container_id = '{}'", container_id));
+            query = query.bind(("container_id", container_id));
         }
-        
         if let Some(ref vm_id) = sandbox.vm_id {
-            update = update.set(format!("vm_id = '{}'", vm_id));
+            query = query.bind(("vm_id", vm_id));
         }
-        
         if let Some(ref ip_address) = sandbox.ip_address {
-            update = update.set(format!("ip_address = '{}'", ip_address));
+            query = query.bind(("ip_address", ip_address));
         }
         
-        if let Some(started_at) = sandbox.started_at {
-            update = update.set(format!("started_at = '{}'", started_at.to_rfc3339()));
-        }
+        let mut response = query.await
+            .map_err(|e| DatabaseError::Query(format!("更新沙盒失败: {}", e)))?;
         
-        if let Some(stopped_at) = sandbox.stopped_at {
-            update = update.set(format!("stopped_at = '{}'", stopped_at.to_rfc3339()));
-        }
+        // Check if update was successful
+        let result: Vec<serde_json::Value> = response.take::<Vec<serde_json::Value>>(0usize)
+            .map_err(|e| DatabaseError::Query(format!("更新失败: {}", e)))?;
         
-        if let Some(expires_at) = sandbox.expires_at {
-            update = update.set(format!("expires_at = '{}'", expires_at.to_rfc3339()));
-        }
-        
-        let results: Vec<SurrealSandbox> = ops.update_where(update).await
-            .map_err(|e| DatabaseError::Query(e.to_string()))?;
-        
-        if results.is_empty() {
+        if result.is_empty() {
             return Err(DatabaseError::NotFound);
         }
         
@@ -227,17 +263,23 @@ impl SandboxRepository {
         let conn = self.pool.get_connection().await
             .map_err(|e| DatabaseError::Connection(e.to_string()))?;
         
-        let ops = SurrealOperations::new(&conn);
+        let record_id = uuid_to_record_id("sandboxes", id);
         
-        let update = UpdateBuilder::new("sandboxes")
-            .set(format!("status = '{}'", status))
-            .set("updated_at = time::now()")
-            .where_clause(format!("id = {}", uuid_to_record_id("sandboxes", id)));
+        // Use direct SurrealQL UPDATE query
+        let sql = "UPDATE $record_id SET status = $status, updated_at = time::now()";
         
-        let results: Vec<SurrealSandbox> = ops.update_where(update).await
-            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        let mut response = conn.db()
+            .query(sql)
+            .bind(("record_id", &record_id))
+            .bind(("status", status))
+            .await
+            .map_err(|e| DatabaseError::Query(format!("更新沙盒状态失败: {}", e)))?;
         
-        if results.is_empty() {
+        // Check if update was successful
+        let result: Vec<serde_json::Value> = response.take::<Vec<serde_json::Value>>(0usize)
+            .map_err(|e| DatabaseError::Query(format!("更新失败: {}", e)))?;
+        
+        if result.is_empty() {
             return Err(DatabaseError::NotFound);
         }
         
@@ -251,12 +293,22 @@ impl SandboxRepository {
         let conn = self.pool.get_connection().await
             .map_err(|e| DatabaseError::Connection(e.to_string()))?;
         
-        let ops = SurrealOperations::new(&conn);
+        let record_id = uuid_to_record_id("sandboxes", id);
         
-        let deleted = ops.delete("sandboxes", &id.to_string()).await
-            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        // Use direct SurrealQL DELETE query
+        let sql = "DELETE $record_id";
         
-        if !deleted {
+        let mut response = conn.db()
+            .query(sql)
+            .bind(("record_id", &record_id))
+            .await
+            .map_err(|e| DatabaseError::Query(format!("删除沙盒失败: {}", e)))?;
+        
+        // Check if deletion was successful
+        let result: Vec<serde_json::Value> = response.take::<Vec<serde_json::Value>>(0usize)
+            .map_err(|e| DatabaseError::Query(format!("删除失败: {}", e)))?;
+        
+        if result.is_empty() {
             return Err(DatabaseError::NotFound);
         }
         
@@ -264,7 +316,7 @@ impl SandboxRepository {
         Ok(())
     }
     
-    /// 列出用户的沙盒
+    /// 列出用户的沙盒 (简化版本 for MVP)
     pub async fn list_by_owner(
         &self,
         owner_id: Uuid,
@@ -272,140 +324,73 @@ impl SandboxRepository {
         page: u32,
         page_size: u32,
     ) -> DatabaseResult<PaginatedResult<DbSandbox>> {
-        debug!("列出用户 {} 的沙盒，状态: {:?}, 页码: {}, 大小: {}", owner_id, status, page, page_size);
+        debug!("列出用户 {} 的沙盒，状态: {:?}", owner_id, status);
         
         let conn = self.pool.get_connection().await
             .map_err(|e| DatabaseError::Connection(e.to_string()))?;
         
-        let ops = SurrealOperations::new(&conn);
+        let owner_record_id = uuid_to_record_id("users", owner_id);
         
-        let mut query = SurrealQueryBuilder::new("sandboxes")
-            .where_clause(format!("owner_id = {}", uuid_to_record_id("users", owner_id)))
-            .order_by("created_at DESC");
-        
-        if let Some(status) = status {
-            query = query.where_clause(format!("status = '{}'", status));
-        }
-        
-        let pagination_result = ops.find_paginated::<SurrealSandbox>(query, page as usize, page_size as usize).await
-            .map_err(|e| DatabaseError::Query(e.to_string()))?;
-        
-        let mut db_sandboxes = Vec::new();
-        for surreal_sandbox in pagination_result.items {
-            db_sandboxes.push(self.surreal_to_db_sandbox(surreal_sandbox)?);
-        }
-        
-        Ok(PaginatedResult::new(
-            db_sandboxes,
-            pagination_result.total,
-            pagination_result.page as u32,
-            pagination_result.page_size as u32,
-        ))
-    }
-    
-    /// 列出租户的沙盒
-    pub async fn list_by_tenant(
-        &self,
-        tenant_id: Uuid,
-        status: Option<&str>,
-        page: u32,
-        page_size: u32,
-    ) -> DatabaseResult<PaginatedResult<DbSandbox>> {
-        debug!("列出租户 {} 的沙盒，状态: {:?}, 页码: {}, 大小: {}", tenant_id, status, page, page_size);
-        
-        let conn = self.pool.get_connection().await
-            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
-        
-        let ops = SurrealOperations::new(&conn);
-        
-        let mut query = SurrealQueryBuilder::new("sandboxes")
-            .where_clause(format!("tenant_id = {}", uuid_to_record_id("tenants", tenant_id)))
-            .order_by("created_at DESC");
-        
-        if let Some(status) = status {
-            query = query.where_clause(format!("status = '{}'", status));
-        }
-        
-        let pagination_result = ops.find_paginated::<SurrealSandbox>(query, page as usize, page_size as usize).await
-            .map_err(|e| DatabaseError::Query(e.to_string()))?;
-        
-        let mut db_sandboxes = Vec::new();
-        for surreal_sandbox in pagination_result.items {
-            db_sandboxes.push(self.surreal_to_db_sandbox(surreal_sandbox)?);
-        }
-        
-        Ok(PaginatedResult::new(
-            db_sandboxes,
-            pagination_result.total,
-            pagination_result.page as u32,
-            pagination_result.page_size as u32,
-        ))
-    }
-    
-    /// 统计用户的沙盒数量
-    pub async fn count_by_owner(&self, owner_id: Uuid, status: Option<&str>) -> DatabaseResult<i64> {
-        debug!("统计用户 {} 的沙盒数量，状态: {:?}", owner_id, status);
-        
-        let conn = self.pool.get_connection().await
-            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
-        
-        let ops = SurrealOperations::new(&conn);
-        
-        let mut query = SurrealQueryBuilder::new("sandboxes")
-            .select("count()")
-            .where_clause(format!("owner_id = {}", uuid_to_record_id("users", owner_id)));
-        
-        if let Some(status) = status {
-            query = query.where_clause(format!("status = '{}'", status));
-        }
-        
-        let results: Vec<surrealdb::Value> = ops.find_where(query).await
-            .map_err(|e| DatabaseError::Query(e.to_string()))?;
-        
-        let count = if let Some(count_value) = results.first() {
-            count_value.as_int() as i64
+        // Simple query without complex pagination for MVP
+        let sql = if let Some(status) = status {
+            "SELECT * FROM sandboxes WHERE owner_id = $owner_id AND status = $status ORDER BY created_at DESC LIMIT $limit"
         } else {
-            0
+            "SELECT * FROM sandboxes WHERE owner_id = $owner_id ORDER BY created_at DESC LIMIT $limit"
         };
         
-        Ok(count)
+        let mut query = conn.db()
+            .query(sql)
+            .bind(("owner_id", &owner_record_id))
+            .bind(("limit", page_size));
+        
+        if let Some(status) = status {
+            query = query.bind(("status", status));
+        }
+        
+        let mut response = query.await
+            .map_err(|e| DatabaseError::Query(format!("查询用户沙盒失败: {}", e)))?;
+        
+        let sandboxes: Vec<SurrealSandbox> = response
+            .take::<Vec<SurrealSandbox>>(0usize)
+            .map_err(|e| DatabaseError::Query(format!("解析查询结果失败: {}", e)))?;
+        
+        let mut db_sandboxes = Vec::new();
+        for surreal_sandbox in sandboxes {
+            db_sandboxes.push(self.surreal_to_db_sandbox(surreal_sandbox)?);
+        }
+        
+        // Simple pagination for MVP - just return what we have
+        Ok(PaginatedResult::new(
+            db_sandboxes,
+            0, // total count not implemented for MVP
+            page,
+            page_size,
+        ))
     }
     
-    /// 清理过期沙盒
-    pub async fn cleanup_expired(&self) -> DatabaseResult<i64> {
-        debug!("清理过期沙盒");
+    /// 简单的按用户统计沙盒数量 (MVP版本)
+    pub async fn count_by_owner(&self, owner_id: Uuid, _status: Option<&str>) -> DatabaseResult<i64> {
+        debug!("统计用户 {} 的沙盒数量", owner_id);
         
         let conn = self.pool.get_connection().await
             .map_err(|e| DatabaseError::Connection(e.to_string()))?;
         
-        let ops = SurrealOperations::new(&conn);
+        let owner_record_id = uuid_to_record_id("users", owner_id);
         
-        // 查找过期沙盒
-        let query = SurrealQueryBuilder::new("sandboxes")
-            .where_clause("expires_at < time::now()")
-            .where_clause("status != 'stopped'");
+        // Simple count query for MVP
+        let sql = "SELECT VALUE count() FROM sandboxes WHERE owner_id = $owner_id";
         
-        let expired_sandboxes: Vec<SurrealSandbox> = ops.find_where(query).await
-            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+        let mut response = conn.db()
+            .query(sql)
+            .bind(("owner_id", &owner_record_id))
+            .await
+            .map_err(|e| DatabaseError::Query(format!("统计沙盒数量失败: {}", e)))?;
         
-        let count = expired_sandboxes.len() as i64;
+        let count: Option<i64> = response
+            .take::<Option<i64>>(0usize)
+            .map_err(|e| DatabaseError::Query(format!("解析统计结果失败: {}", e)))?;
         
-        if count > 0 {
-            // 更新过期沙盒状态
-            let update = UpdateBuilder::new("sandboxes")
-                .set("status = 'stopped'")
-                .set("stopped_at = time::now()")
-                .set("updated_at = time::now()")
-                .where_clause("expires_at < time::now()")
-                .where_clause("status != 'stopped'");
-            
-            ops.update_where::<SurrealSandbox>(update).await
-                .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            
-            info!("清理了 {} 个过期沙盒", count);
-        }
-        
-        Ok(count)
+        Ok(count.unwrap_or(0))
     }
     
     /// 将 SurrealSandbox 转换为 DbSandbox

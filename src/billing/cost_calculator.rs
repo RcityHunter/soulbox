@@ -374,19 +374,19 @@ mod tests {
 
         // Percentage discount
         let percentage_discount = DiscountType::Percentage(Decimal::new(10, 0)); // 10%
-        assert_eq!(percentage_discount.calculate_discount(subtotal), Decimal::new(100, 2)); // $1.00
+        assert_eq!(percentage_discount.calculate_discount(subtotal).unwrap(), Decimal::new(100, 2)); // $1.00
 
         // Fixed amount discount
         let fixed_discount = DiscountType::FixedAmount(Decimal::new(200, 2)); // $2.00
-        assert_eq!(fixed_discount.calculate_discount(subtotal), Decimal::new(200, 2)); // $2.00
+        assert_eq!(fixed_discount.calculate_discount(subtotal).unwrap(), Decimal::new(200, 2)); // $2.00
 
         // Volume discount (threshold met)
         let volume_discount = DiscountType::Volume(Decimal::new(500, 2), Decimal::new(15, 0)); // $5.00 threshold, 15%
-        assert_eq!(volume_discount.calculate_discount(subtotal), Decimal::new(150, 2)); // $1.50
+        assert_eq!(volume_discount.calculate_discount(subtotal).unwrap(), Decimal::new(150, 2)); // $1.50
 
         // Volume discount (threshold not met)
         let volume_discount_not_met = DiscountType::Volume(Decimal::new(1500, 2), Decimal::new(15, 0)); // $15.00 threshold, 15%
-        assert_eq!(volume_discount_not_met.calculate_discount(subtotal), Decimal::ZERO);
+        assert_eq!(volume_discount_not_met.calculate_discount(subtotal).unwrap(), Decimal::ZERO);
     }
 
     #[test]
@@ -460,7 +460,7 @@ mod tests {
             DiscountType::FixedAmount(Decimal::new(200, 2)), // $2.00
         ];
         
-        let total_discount = calculator.calculate_total_discounts(&discounts, subtotal);
+        let total_discount = calculator.calculate_total_discounts(&discounts, subtotal).unwrap();
         
         // 10% of $20.00 = $2.00, then $2.00 fixed = $4.00 total
         assert_eq!(total_discount, Decimal::new(400, 2));
@@ -474,13 +474,13 @@ mod tests {
         };
         
         let subtotal = Decimal::new(1000, 2); // $10.00
-        assert_eq!(expired_promo.calculate_discount(subtotal), Decimal::ZERO);
+        assert_eq!(expired_promo.calculate_discount(subtotal).unwrap(), Decimal::ZERO);
         
         let active_promo = DiscountType::Promotional {
             percentage: Decimal::new(50, 0), // 50%
             expires_at: Utc::now() + chrono::Duration::days(1), // Expires tomorrow
         };
         
-        assert_eq!(active_promo.calculate_discount(subtotal), Decimal::new(500, 2)); // $5.00
+        assert_eq!(active_promo.calculate_discount(subtotal).unwrap(), Decimal::new(500, 2)); // $5.00
     }
 }

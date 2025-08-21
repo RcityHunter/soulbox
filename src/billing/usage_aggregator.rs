@@ -690,8 +690,8 @@ mod tests {
         assert_eq!(daily_rounded.second(), 0);
     }
 
-    #[test]
-    fn test_aggregation_bucket() {
+    #[tokio::test]
+    async fn test_aggregation_bucket() {
         let user_id = Uuid::new_v4();
         let start_time = Utc::now();
         let mut bucket = AggregationBucket::new(user_id, AggregationPeriod::Hourly, start_time);
@@ -707,10 +707,10 @@ mod tests {
         };
 
         bucket.add_metric(&metric);
-        assert_eq!(bucket.session_ids.len(), 1);
-        assert_eq!(bucket.metrics.get(&MetricType::CpuUsage).unwrap().len(), 1);
+        assert_eq!(bucket.session_ids.lock().await.len(), 1);
+        assert_eq!(bucket.metrics.lock().await.get(&MetricType::CpuUsage).unwrap().len(), 1);
 
-        let summary = bucket.to_usage_summary();
+        let summary = bucket.to_usage_summary().await.unwrap();
         assert_eq!(summary.user_id, user_id);
         assert_eq!(summary.session_count, 1);
         assert!(summary.metrics.contains_key(&MetricType::CpuUsage));

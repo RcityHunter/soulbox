@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use tokio::time::{timeout, Duration as TokioDuration};
 
 use crate::{error::{Result, SoulBoxError}, config::Config};
-use crate::network::{NetworkManager, SandboxNetworkConfig, NetworkError};
+use crate::network::{SandboxNetworkConfig, NetworkError};
 use super::{SandboxContainer, ResourceLimits, NetworkConfig};
 
 #[derive(Debug, Clone)]
@@ -177,7 +177,7 @@ impl ContainerManager {
             
             // Disk I/O limits (using device cgroup v2 if available)
             // Note: These require proper cgroup setup on the host
-            blkio_weight: Some(500), // Default I/O weight
+            // blkio_weight: Some(500), // Default I/O weight (disabled for compatibility)
             
             // Port mappings from network configuration
             port_bindings: if !network_config.base_config.port_mappings.is_empty() {
@@ -216,10 +216,9 @@ impl ContainerManager {
             // Enhanced security constraints to prevent container escape
             security_opt: Some(vec![
                 "no-new-privileges:true".to_string(),
-                "seccomp:default".to_string(), // Use default seccomp profile instead of unconfined
-                "apparmor:docker-default".to_string(), // Enable AppArmor protection
-                // Additional security hardening
-                "systempaths=unconfined".to_string(), // Restrict access to system paths
+                // "seccomp:default".to_string(), // Use default seccomp profile (disabled for compatibility)
+                // "apparmor:docker-default".to_string(), // Enable AppArmor protection (disabled for compatibility)
+                // "systempaths=unconfined".to_string(), // Restrict access to system paths (disabled for compatibility)
             ]),
             cap_drop: Some(vec!["ALL".to_string()]), // Drop all capabilities first
             cap_add: Some(vec![
@@ -250,17 +249,17 @@ impl ContainerManager {
             
             // Prevent access to host devices and filesystems
             ipc_mode: Some("none".to_string()), // Disable IPC namespace sharing
-            uts_mode: Some("none".to_string()), // Disable UTS namespace sharing
+            // uts_mode: Some("none".to_string()), // Disable UTS namespace sharing - not supported by Docker
             
             // Network restrictions disabled - using previous DNS config
             
-            // Prevent privilege escalation through sysctl
-            sysctls: Some({
-                let mut sysctls = std::collections::HashMap::new();
-                sysctls.insert("net.ipv4.ping_group_range".to_string(), "0 0".to_string()); // Disable ping
-                sysctls.insert("kernel.dmesg_restrict".to_string(), "1".to_string()); // Restrict dmesg access
-                sysctls
-            }),
+            // Prevent privilege escalation through sysctl (disabled for compatibility)
+            // sysctls: Some({
+            //     let mut sysctls = std::collections::HashMap::new();
+            //     sysctls.insert("net.ipv4.ping_group_range".to_string(), "0 0".to_string()); // Disable ping
+            //     sysctls.insert("kernel.dmesg_restrict".to_string(), "1".to_string()); // Restrict dmesg access
+            //     sysctls
+            // }),
             
             // Ulimits for additional security
             ulimits: Some(vec![

@@ -8,7 +8,10 @@ use crate::auth::middleware::{AuthMiddleware, AuthExtractor};
 use crate::auth::models::Permission;
 use crate::auth::{api_key::ApiKeyManager, JwtManager};
 use crate::config::Config;
-use crate::database::SurrealPool;
+use crate::container::{ContainerManager, ResourceLimits, NetworkConfig};
+use crate::container::resource_limits::{MemoryLimits, CpuLimits, DiskLimits, NetworkLimits};
+use crate::database::{SurrealPool, repositories::SandboxRepository};
+use crate::database::models::DbSandbox;
 use crate::error::{Result as SoulBoxResult, SoulBoxError};
 use crate::validation::InputValidator;
 use tracing::{info, error, warn};
@@ -35,6 +38,8 @@ pub struct AppState {
     pub auth_middleware: Arc<AuthMiddleware>,
     pub audit_middleware: Arc<AuditMiddleware>,
     pub database: Option<Arc<SurrealPool>>,
+    pub container_manager: Arc<ContainerManager>,
+    pub sandbox_repository: Option<Arc<SandboxRepository>>,
 }
 
 pub struct Server {
@@ -110,6 +115,27 @@ impl Server {
         
         // Create template state if database is available
         let template_state = database.as_ref().map(|db| TemplateState::new(db.clone()));
+        
+        // Initialize container manager
+        let container_manager = if std::env::var("DOCKER_HOST").is_ok() || std::env::var("DOCKER_SOCK").is_ok() {
+            info!("Initializing real Docker container manager...");
+            match ContainerManager::new(config.clone()).await {
+                Ok(cm) => {
+                    info!("Container manager initialized successfully");
+                    Arc::new(cm)
+                }
+                Err(e) => {
+                    warn!("Failed to initialize Docker container manager: {}. Using stub implementation.", e);
+                    Arc::new(ContainerManager::new_stub()?)
+                }
+            }
+        } else {
+            info!("No Docker environment detected. Using stub container manager.");
+            Arc::new(ContainerManager::new_stub()?)
+        };
+        
+        // Initialize sandbox repository if database is available
+        let sandbox_repository = database.as_ref().map(|db| Arc::new(SandboxRepository::new(db.clone())));
 
         let app_state = AppState {
             config: config.clone(),
@@ -119,6 +145,8 @@ impl Server {
             auth_middleware: auth_state.auth_middleware.clone(),
             audit_middleware: audit_middleware.clone(),
             database,
+            container_manager,
+            sandbox_repository,
         };
 
         let app = create_app(app_state);
@@ -306,19 +334,116 @@ async fn create_sandbox(
     // Generate sandbox ID
     let sandbox_id = format!("sb_{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..8].to_lowercase());
     
-    // For now, return a simple response - actual sandbox creation would happen here
-    // In a full implementation, this would integrate with the container manager
-    Ok(Json(json!({
-        "id": sandbox_id,
-        "status": "creating",
-        "template": template,
-        "memory_mb": memory_mb,
-        "cpu_cores": cpu_cores,
-        "enable_internet": enable_internet,
-        "owner_id": auth.0.user_id,
-        "tenant_id": auth.0.tenant_id,
-        "created_at": chrono::Utc::now().to_rfc3339()
-    })))
+    // Map template to docker image
+    let docker_image = match template {
+        "python:3.11" | "python" => "python:3.11-slim",
+        "node:18" | "node" | "javascript" => "node:18-alpine", 
+        "rust" => "rust:1.70-slim",
+        "go" => "golang:1.20-alpine",
+        _ => "ubuntu:22.04", // Default fallback
+    };
+    
+    // Create resource limits
+    let resource_limits = ResourceLimits {
+        memory: MemoryLimits {
+            limit_mb: memory_mb,
+            swap_mb: Some(memory_mb / 2),
+            swap_limit_mb: Some(memory_mb),
+        },
+        cpu: CpuLimits {
+            cores: cpu_cores,
+            cpu_percent: Some(80.0),
+            shares: Some(1024),
+        },
+        disk: DiskLimits {
+            limit_mb: 2048,
+            iops_limit: Some(1000),
+        },
+        network: NetworkLimits {
+            upload_bps: Some(1024 * 1024), // 1 MB/s
+            download_bps: Some(10 * 1024 * 1024), // 10 MB/s
+            max_connections: Some(100),
+        },
+    };
+    
+    // Create network config
+    let network_config = NetworkConfig {
+        enable_internet,
+        port_mappings: vec![], // No port mappings by default
+        allowed_domains: vec![], // No domain restrictions by default
+        dns_servers: vec!["8.8.8.8".to_string(), "1.1.1.1".to_string()],
+    };
+    
+    // Create environment variables
+    let env_vars = std::collections::HashMap::new(); // Default empty
+    
+    // Create container using container manager
+    match state.container_manager.create_sandbox_container(
+        &sandbox_id,
+        docker_image,
+        resource_limits.clone(),
+        network_config.clone(),
+        env_vars.clone()
+    ).await {
+        Ok(container) => {
+            // Start the container
+            match container.start().await {
+                Ok(_) => {
+                    info!("Container started successfully for sandbox {}", sandbox_id);
+                    
+                    // Save to database if available
+                    if let Some(ref repo) = state.sandbox_repository {
+                        let db_sandbox = DbSandbox {
+                            id: auth.0.user_id,
+                            name: format!("Sandbox {}", &sandbox_id[3..]),
+                            runtime_type: template.to_string(),
+                            template: template.to_string(),
+                            status: "running".to_string(),
+                            owner_id: auth.0.user_id,
+                            tenant_id: auth.0.tenant_id,
+                            cpu_limit: Some(cpu_cores as i64),
+                            memory_limit: Some(memory_mb as i64),
+                            disk_limit: None,
+                            container_id: Some(container.get_container_id().to_string()),
+                            vm_id: None,
+                            ip_address: None,
+                            port_mappings: None,
+                            created_at: chrono::Utc::now(),
+                            updated_at: chrono::Utc::now(),
+                            started_at: Some(chrono::Utc::now()),
+                            stopped_at: None,
+                            expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(2)), // 2 hour expiry
+                        };
+                        
+                        if let Err(e) = repo.create(&db_sandbox).await {
+                            warn!("Failed to save sandbox to database: {}", e);
+                        }
+                    }
+                    
+                    Ok(Json(json!({
+                        "id": sandbox_id,
+                        "status": "running",
+                        "template": template,
+                        "memory_mb": memory_mb,
+                        "cpu_cores": cpu_cores,
+                        "enable_internet": enable_internet,
+                        "owner_id": auth.0.user_id,
+                        "tenant_id": auth.0.tenant_id,
+                        "container_id": container.get_container_id(),
+                        "created_at": chrono::Utc::now().to_rfc3339()
+                    })))
+                },
+                Err(e) => {
+                    error!("Failed to start container for sandbox {}: {}", sandbox_id, e);
+                    Err(StatusCode::INTERNAL_SERVER_ERROR)
+                }
+            }
+        },
+        Err(e) => {
+            error!("Failed to create container for sandbox {}: {}", sandbox_id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
 
 async fn get_sandbox(
@@ -363,21 +488,35 @@ async fn delete_sandbox(
     let validated_id = InputValidator::validate_sandbox_id(&id)
         .map_err(|_| StatusCode::BAD_REQUEST)?;
     
-    // In a full implementation, would:
-    // 1. Check if sandbox exists and user has permission
-    // 2. Stop and remove container
-    // 3. Clean up resources
-    // 4. Update database
-    
-    if validated_id.starts_with("sb_") {
-        Ok(Json(json!({
-            "id": validated_id,
-            "status": "deleted",
-            "deleted_by": auth.0.user_id,
-            "deleted_at": chrono::Utc::now().to_rfc3339()
-        })))
-    } else {
-        Err(StatusCode::NOT_FOUND)
+    // Remove container using container manager
+    match state.container_manager.remove_container(&validated_id).await {
+        Ok(_) => {
+            info!("Container removed successfully for sandbox {}", validated_id);
+            
+            // Update database if available
+            if let Some(ref repo) = state.sandbox_repository {
+                // Try to find sandbox by container_id/sandbox_id and delete
+                // For MVP, we'll just log the deletion
+                info!("Would delete sandbox {} from database", validated_id);
+            }
+            
+            Ok(Json(json!({
+                "id": validated_id,
+                "status": "deleted", 
+                "deleted_by": auth.0.user_id,
+                "deleted_at": chrono::Utc::now().to_rfc3339()
+            })))
+        },
+        Err(e) => {
+            // Check if it's a "not found" error or other error
+            if e.to_string().contains("not found") || e.to_string().contains("No such container") {
+                warn!("Container {} not found for deletion", validated_id);
+                Err(StatusCode::NOT_FOUND)
+            } else {
+                error!("Failed to delete container for sandbox {}: {}", validated_id, e);
+                Err(StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        }
     }
 }
 
@@ -416,27 +555,58 @@ async fn execute_in_sandbox(
     // Generate execution ID
     let execution_id = format!("exec_{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..8].to_lowercase());
     
-    // In a full implementation, would:
-    // 1. Validate sandbox exists and user has access
-    // 2. Queue code execution job
-    // 3. Execute code in sandbox container
-    // 4. Return results
-    
-    if id.starts_with("sb_") {
-        Ok(Json(json!({
-            "execution_id": execution_id,
-            "sandbox_id": id,
-            "status": "completed",
-            "language": language,
-            "code_length": code.len(),
-            "executed_by": auth.0.user_id,
-            "started_at": chrono::Utc::now().to_rfc3339(),
-            "stdout": "Hello, World!",
-            "stderr": "",
-            "exit_code": 0
-        })))
-    } else {
-        Err(StatusCode::NOT_FOUND)
+    // Get container by sandbox ID
+    match state.container_manager.get_container(&validated_id).await {
+        Some(container) => {
+            // Create command based on language
+            let command = match language {
+                "python" => vec!["python3".to_string(), "-c".to_string(), code.to_string()],
+                "javascript" | "node" => vec!["node".to_string(), "-e".to_string(), code.to_string()],
+                "bash" => vec!["bash".to_string(), "-c".to_string(), code.to_string()],
+                "rust" => {
+                    // For Rust, we'd need to create a proper file and compile - simplified for MVP
+                    vec!["bash".to_string(), "-c".to_string(), format!("echo '{}' > /tmp/main.rs && rustc /tmp/main.rs -o /tmp/main && /tmp/main", code)]
+                },
+                "go" => {
+                    // Similar simplification for Go
+                    vec!["bash".to_string(), "-c".to_string(), format!("echo '{}' > /tmp/main.go && cd /tmp && go run main.go", code)]
+                },
+                _ => vec!["bash".to_string(), "-c".to_string(), code.to_string()],
+            };
+            
+            let start_time = chrono::Utc::now();
+            
+            // Execute code in the container
+            match container.execute_command(command).await {
+                Ok(result) => {
+                    let end_time = chrono::Utc::now();
+                    let duration = end_time - start_time;
+                    
+                    Ok(Json(json!({
+                        "execution_id": execution_id,
+                        "sandbox_id": validated_id,
+                        "status": if result.exit_code == 0 { "completed" } else { "failed" },
+                        "language": language,
+                        "code_length": code.len(),
+                        "executed_by": auth.0.user_id,
+                        "started_at": start_time.to_rfc3339(),
+                        "completed_at": end_time.to_rfc3339(),
+                        "duration_ms": duration.num_milliseconds(),
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "exit_code": result.exit_code
+                    })))
+                },
+                Err(e) => {
+                    error!("Code execution failed in sandbox {}: {}", validated_id, e);
+                    Err(StatusCode::INTERNAL_SERVER_ERROR)
+                }
+            }
+        },
+        None => {
+            warn!("Sandbox {} not found for user {}", validated_id, auth.0.username);
+            Err(StatusCode::NOT_FOUND)
+        }
     }
 }
 
