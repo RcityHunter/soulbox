@@ -411,7 +411,7 @@ proptest! {
         total in arb_small_decimal(),
         count in 1u64..=1000
     ) {
-        let average = total / Decimal::new(count, 0);
+        let average = total / Decimal::new(count as i64, 0);
         let aggregated = AggregatedMetric {
             total,
             average,
@@ -421,7 +421,7 @@ proptest! {
         };
         
         // Mathematical properties should hold
-        prop_assert_eq!(aggregated.total, aggregated.average * Decimal::new(count, 0));
+        prop_assert_eq!(aggregated.total, aggregated.average * Decimal::new(count as i64, 0));
         prop_assert!(aggregated.maximum >= aggregated.average);
         prop_assert!(aggregated.average >= aggregated.minimum);
         prop_assert!(aggregated.maximum >= aggregated.minimum);

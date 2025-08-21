@@ -539,7 +539,7 @@ mod tests {
         )).unwrap();
 
         // 查询所有日志
-        let all_logs = service.query(AuditQuery::default()).unwrap();
+        let all_logs = service.query(AuditQuery::default()).await.unwrap();
         assert_eq!(all_logs.len(), 2);
 
         // 查询特定事件类型
@@ -547,7 +547,7 @@ mod tests {
             event_type: Some(AuditEventType::UserLogin),
             ..Default::default()
         };
-        let login_logs = service.query(login_query).unwrap();
+        let login_logs = service.query(login_query).await.unwrap();
         assert_eq!(login_logs.len(), 1);
     }
 
@@ -572,7 +572,7 @@ mod tests {
         // 等待异步处理
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
-        let logs = service.query(AuditQuery::default()).unwrap();
+        let logs = service.query(AuditQuery::default()).await.unwrap();
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].event_type, AuditEventType::UserLogin);
     }

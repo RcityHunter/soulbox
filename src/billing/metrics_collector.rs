@@ -532,10 +532,10 @@ pub struct ContainerStats {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_metric_buffer() {
+    #[tokio::test]
+    async fn test_metric_buffer() {
         let mut buffer = MetricBuffer::new();
-        assert_eq!(buffer.metrics.len(), 0);
+        assert_eq!(buffer.metrics.lock().await.len(), 0);
 
         let metric = UsageMetric {
             id: Uuid::new_v4(),
@@ -547,12 +547,12 @@ mod tests {
             metadata: None,
         };
 
-        buffer.add_metric(metric);
-        assert_eq!(buffer.metrics.len(), 1);
+        buffer.add_metric(metric).await;
+        assert_eq!(buffer.metrics.lock().await.len(), 1);
 
-        let flushed = buffer.flush();
+        let flushed = buffer.flush().await;
         assert_eq!(flushed.len(), 1);
-        assert_eq!(buffer.metrics.len(), 0);
+        assert_eq!(buffer.metrics.lock().await.len(), 0);
     }
 
     #[test]

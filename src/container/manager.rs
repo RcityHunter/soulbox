@@ -982,13 +982,16 @@ impl ResourceTracker {
 #[cfg(test)]
 pub struct MockContainerManager {
     containers: HashMap<String, Arc<SandboxContainer>>,
+    docker: Arc<Docker>,
 }
 
 #[cfg(test)]
 impl MockContainerManager {
     pub fn new() -> Self {
+        let docker = Docker::connect_with_defaults().unwrap();
         Self {
             containers: HashMap::new(),
+            docker: Arc::new(docker),
         }
     }
 

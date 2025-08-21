@@ -290,7 +290,7 @@ mod tests {
             "test-secret-key",
             "soulbox".to_string(),
             "soulbox-api".to_string(),
-        ));
+        ).unwrap());
         let api_key_manager = Arc::new(ApiKeyManager::new("sk".to_string()));
         
         AuthState::new(jwt_manager, api_key_manager)
@@ -299,7 +299,7 @@ mod tests {
     #[tokio::test]
     async fn test_permission_routes_creation() {
         let auth_state = create_test_auth_state();
-        let _router = permission_routes(auth_state);
+        let _router: axum::Router = permission_routes(auth_state);
         // 路由创建成功
     }
 }

@@ -552,10 +552,18 @@ mod security_tests {
             "<script>alert('xss')</script>",
             "../../etc/passwd",
             "\x00\x01\x02", // Binary data
-            &"a".repeat(10000), // Very long string
         ];
         
-        for malicious_name in malicious_names {
+        let long_string = "a".repeat(10000);
+        let malicious_names_with_long = [
+            malicious_names[0],
+            malicious_names[1], 
+            malicious_names[2],
+            malicious_names[3],
+            &long_string,
+        ];
+        
+        for malicious_name in malicious_names_with_long {
             let custom_metric = MetricType::Custom(malicious_name.to_string());
             
             // Should handle malicious names without crashing
