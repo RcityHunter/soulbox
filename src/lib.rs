@@ -73,5 +73,8 @@ pub mod soulbox {
 #[path = "soulbox.v1.rs"]
 mod soulbox_v1;
 
+// gRPC service traits
+pub mod soulbox_grpc;
+
 // gRPC exports
 pub use grpc::FILE_DESCRIPTOR_SET;

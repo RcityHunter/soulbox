@@ -355,7 +355,7 @@ pub struct DeleteFileResponse {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SandboxStreamRequest {
-    #[prost(oneof = "sandbox_stream_request::Request", tags = "1, 2, 3")]
+    #[prost(oneof = "sandbox_stream_request::Request", tags = "1, 2, 3, 4")]
     pub request: ::core::option::Option<sandbox_stream_request::Request>,
 }
 /// Nested message and enum types in `SandboxStreamRequest`.
@@ -369,6 +369,8 @@ pub mod sandbox_stream_request {
         Command(super::SandboxStreamCommand),
         #[prost(message, tag = "3")]
         Data(super::SandboxStreamData),
+        #[prost(message, tag = "4")]
+        Close(super::SandboxStreamClose),
     }
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -395,8 +397,14 @@ pub struct SandboxStreamData {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SandboxStreamClose {
+    #[prost(string, tag = "1")]
+    pub reason: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SandboxStreamResponse {
-    #[prost(oneof = "sandbox_stream_response::Response", tags = "1, 2, 3")]
+    #[prost(oneof = "sandbox_stream_response::Response", tags = "1, 2, 3, 4")]
     pub response: ::core::option::Option<sandbox_stream_response::Response>,
 }
 /// Nested message and enum types in `SandboxStreamResponse`.
@@ -410,6 +418,8 @@ pub mod sandbox_stream_response {
         Output(super::SandboxStreamOutput),
         #[prost(message, tag = "3")]
         Error(super::SandboxStreamError),
+        #[prost(message, tag = "4")]
+        Closed(super::SandboxStreamClosed),
     }
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -436,11 +446,17 @@ pub struct SandboxStreamError {
     #[prost(string, tag = "2")]
     pub error_message: ::prost::alloc::string::String,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SandboxStreamClosed {
+    #[prost(string, tag = "1")]
+    pub reason: ::prost::alloc::string::String,
+}
 /// Terminal streaming
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TerminalStreamRequest {
-    #[prost(oneof = "terminal_stream_request::Request", tags = "1, 2, 3")]
+    #[prost(oneof = "terminal_stream_request::Request", tags = "1, 2, 3, 4")]
     pub request: ::core::option::Option<terminal_stream_request::Request>,
 }
 /// Nested message and enum types in `TerminalStreamRequest`.
@@ -454,6 +470,8 @@ pub mod terminal_stream_request {
         Input(super::TerminalInput),
         #[prost(message, tag = "3")]
         Resize(super::TerminalResize),
+        #[prost(message, tag = "4")]
+        Close(super::TerminalClose),
     }
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -498,6 +516,12 @@ pub struct TerminalResize {
     pub rows: u32,
     #[prost(uint32, tag = "3")]
     pub cols: u32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TerminalClose {
+    #[prost(string, tag = "1")]
+    pub reason: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

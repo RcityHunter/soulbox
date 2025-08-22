@@ -4,9 +4,7 @@ use crate::template::{
     TemplateManager, TemplateError,
     models::{CreateTemplateRequest, UpdateTemplateRequest},
 };
-use crate::database::SurrealPool;
-// TODO: Re-enable when TemplateRepository is refactored
-// use crate::database::TemplateRepository;
+use crate::database::{SurrealPool, TemplateRepository};
 use crate::error::SoulBoxError;
 use axum::{
     extract::{Path, Query, State},
@@ -28,11 +26,8 @@ pub struct TemplateState {
 
 impl TemplateState {
     pub fn new(database: Arc<SurrealPool>) -> Self {
-        // TODO: Re-enable when TemplateRepository is refactored
-        // let template_repository = Arc::new(TemplateRepository::new(database));
-        // let template_manager = Arc::new(TemplateManager::new(template_repository));
-        // For now, create a dummy template manager
-        let template_manager = Arc::new(TemplateManager::new_without_database());
+        let template_repository = Arc::new(TemplateRepository::new(database));
+        let template_manager = Arc::new(TemplateManager::new(template_repository));
         Self { template_manager }
     }
 }

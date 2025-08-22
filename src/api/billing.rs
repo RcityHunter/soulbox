@@ -11,7 +11,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::sse::{Event, KeepAlive, Sse},
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use chrono::{DateTime, Utc};
@@ -102,16 +102,16 @@ pub struct RealtimeMetrics {
 /// Create billing API routes
 pub fn create_billing_routes() -> Router<BillingApiState> {
     Router::new()
-        .route("/usage", get(get_usage_summary)) // TODO: Re-enable .post(record_usage) after fixing handler
+        .route("/usage", get(get_usage_summary).post(record_usage))
         .route("/usage/realtime", get(get_realtime_usage))
         .route("/usage/realtime/stream", get(realtime_usage_stream))
         .route("/usage/sessions/{session_id}", get(get_session_usage))
         .route("/billing/records", get(get_billing_records))
         .route("/billing/records/{record_id}", get(get_billing_record))
-        // .route("/billing/estimate", post(estimate_cost)) // TODO: Fix handler
+        .route("/billing/estimate", post(estimate_cost))
         .route("/invoices", get(get_user_invoices))
         .route("/invoices/{invoice_id}", get(get_invoice))
-        // .route("/invoices/:invoice_id/status", post(update_invoice_status)) // TODO: Fix handler
+        .route("/invoices/{invoice_id}/status", put(update_invoice_status))
         .route("/metrics/realtime", get(realtime_metrics_stream))
 }
 
@@ -161,8 +161,8 @@ async fn get_usage_summary(
 /// Record a usage metric
 async fn record_usage(
     State(state): State<BillingApiState>,
-    Json(request): Json<RecordUsageRequest>,
     auth: AuthExtractor,
+    Json(request): Json<RecordUsageRequest>,
 ) -> Result<StatusCode> {
     let user_id = auth.0.user_id;
 
@@ -359,8 +359,8 @@ pub struct CostEstimateResponse {
 
 async fn estimate_cost(
     State(state): State<BillingApiState>,
-    Json(request): Json<CostEstimateRequest>,
     auth: AuthExtractor,
+    Json(request): Json<CostEstimateRequest>,
 ) -> Result<Json<CostEstimateResponse>> {
     let _user_id = auth.0.user_id;
 
@@ -444,8 +444,8 @@ pub struct UpdateInvoiceStatusRequest {
 async fn update_invoice_status(
     State(state): State<BillingApiState>,
     Path(invoice_id): Path<Uuid>,
-    Json(request): Json<UpdateInvoiceStatusRequest>,
     auth: AuthExtractor,
+    Json(request): Json<UpdateInvoiceStatusRequest>,
 ) -> Result<StatusCode> {
     let _user_id = auth.0.user_id;
 

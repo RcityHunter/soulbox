@@ -155,7 +155,15 @@ impl SandboxFileSystem {
                 size: metadata.len(),
                 is_directory: metadata.is_dir(),
                 is_symlink: metadata.is_symlink(),
-                symlink_target: None, // TODO: Read symlink target
+                symlink_target: if metadata.is_symlink() {
+                    // Read symlink target safely
+                    match fs::read_link(entry.path()).await {
+                        Ok(target) => Some(target.to_string_lossy().to_string()),
+                        Err(_) => None, // Failed to read symlink, continue
+                    }
+                } else {
+                    None
+                },
                 permissions: FilePermissions::from_metadata(&metadata),
                 created_at: metadata.created().unwrap_or(std::time::UNIX_EPOCH),
                 modified_at: metadata.modified().unwrap_or(std::time::UNIX_EPOCH),
@@ -168,12 +176,27 @@ impl SandboxFileSystem {
     pub async fn set_permissions(&self, path: &str, permissions: FilePermissions) -> Result<()> {
         let full_path = self.resolve_path(path)?;
         
-        // TODO: Implement actual permission setting
-        // For now, just verify the file exists
         if !full_path.exists() {
             return Err(SoulBoxError::filesystem(
                 format!("File not found: {path}")
             ));
+        }
+
+        // Implement actual permission setting
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&full_path).await?.permissions();
+            perms.set_mode(permissions.mode);
+            fs::set_permissions(&full_path, perms).await?;
+        }
+        
+        #[cfg(windows)]
+        {
+            // On Windows, we can only set readonly attribute
+            let mut perms = fs::metadata(&full_path).await?.permissions();
+            perms.set_readonly(!permissions.writable);
+            fs::set_permissions(&full_path, perms).await?;
         }
 
         Ok(())
@@ -301,22 +324,26 @@ impl SandboxFileSystem {
             .unwrap()
             .join(format!("{snapshot_id}_snapshot"));
 
-        // TODO: Implement actual filesystem snapshot
-        // For now, just create an empty directory as a placeholder
-        fs::create_dir_all(&snapshot_path).await?;
+        // Implement actual filesystem snapshot by copying the entire directory
+        self.copy_directory_recursive(&self.root_path, &snapshot_path).await?;
         
         self.snapshots.insert(snapshot_id.clone(), snapshot_path);
         Ok(snapshot_id)
     }
 
     pub async fn restore_from_snapshot(&self, snapshot_id: &str) -> Result<()> {
-        let _snapshot_path = self.snapshots.get(snapshot_id)
+        let snapshot_path = self.snapshots.get(snapshot_id)
             .ok_or_else(|| SoulBoxError::filesystem(
                 format!("Snapshot not found: {snapshot_id}")
             ))?;
 
-        // TODO: Implement actual snapshot restoration
-        // For now, just return success
+        // Implement actual snapshot restoration
+        // First, clean up the current directory (except for snapshots metadata)
+        self.clear_directory_contents(&self.root_path).await?;
+        
+        // Then copy all contents from snapshot back
+        self.copy_directory_recursive(snapshot_path, &self.root_path).await?;
+        
         Ok(())
     }
 
@@ -355,5 +382,64 @@ impl SandboxFileSystem {
         }
 
         Ok(resolved_path)
+    }
+
+    /// Copy directory recursively for snapshots
+    async fn copy_directory_recursive(&self, source: &PathBuf, destination: &PathBuf) -> Result<()> {
+        fs::create_dir_all(destination).await?;
+        
+        let mut stack = vec![(source.clone(), destination.clone())];
+        
+        while let Some((src_dir, dst_dir)) = stack.pop() {
+            let mut dir_stream = fs::read_dir(&src_dir).await?;
+            
+            while let Some(entry) = dir_stream.next_entry().await? {
+                let src_path = entry.path();
+                let dst_path = dst_dir.join(entry.file_name());
+                
+                let metadata = entry.metadata().await?;
+                
+                if metadata.is_dir() {
+                    fs::create_dir_all(&dst_path).await?;
+                    stack.push((src_path, dst_path));
+                } else if metadata.is_symlink() {
+                    // Copy symlink
+                    let target = fs::read_link(&src_path).await?;
+                    #[cfg(unix)]
+                    fs::symlink(&target, &dst_path).await?;
+                    #[cfg(windows)]
+                    {
+                        if target.is_dir() {
+                            fs::symlink_dir(&target, &dst_path).await?;
+                        } else {
+                            fs::symlink_file(&target, &dst_path).await?;
+                        }
+                    }
+                } else {
+                    // Copy regular file
+                    fs::copy(&src_path, &dst_path).await?;
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// Clear directory contents while preserving the directory itself
+    async fn clear_directory_contents(&self, dir_path: &PathBuf) -> Result<()> {
+        let mut dir_stream = fs::read_dir(dir_path).await?;
+        
+        while let Some(entry) = dir_stream.next_entry().await? {
+            let path = entry.path();
+            let metadata = entry.metadata().await?;
+            
+            if metadata.is_dir() {
+                fs::remove_dir_all(&path).await?;
+            } else {
+                fs::remove_file(&path).await?;
+            }
+        }
+        
+        Ok(())
     }
 }

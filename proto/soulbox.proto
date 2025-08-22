@@ -244,6 +244,7 @@ message SandboxStreamRequest {
         SandboxStreamInit init = 1;
         SandboxStreamCommand command = 2;
         SandboxStreamData data = 3;
+        SandboxStreamClose close = 4;
     }
 }
 
@@ -261,11 +262,16 @@ message SandboxStreamData {
     bytes data = 1;
 }
 
+message SandboxStreamClose {
+    string reason = 1;
+}
+
 message SandboxStreamResponse {
     oneof response {
         SandboxStreamReady ready = 1;
         SandboxStreamOutput output = 2;
         SandboxStreamError error = 3;
+        SandboxStreamClosed closed = 4;
     }
 }
 
@@ -284,6 +290,10 @@ message SandboxStreamError {
     string error_message = 2;
 }
 
+message SandboxStreamClosed {
+    string reason = 1;
+}
+
 enum StreamType {
     STREAM_TYPE_UNSPECIFIED = 0;
     STREAM_TYPE_TERMINAL = 1;
@@ -297,6 +307,7 @@ message TerminalStreamRequest {
         TerminalInit init = 1;
         TerminalInput input = 2;
         TerminalResize resize = 3;
+        TerminalClose close = 4;
     }
 }
 
@@ -322,6 +333,10 @@ message TerminalResize {
     string terminal_id = 1;
     uint32 rows = 2;
     uint32 cols = 3;
+}
+
+message TerminalClose {
+    string reason = 1;
 }
 
 message TerminalStreamResponse {

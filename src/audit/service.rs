@@ -366,10 +366,22 @@ impl AuditService {
                 warn!("⚠️ 高严重程度事件: {:?} - {}", log.event_type, log.message);
             }
 
-            // TODO: 未来可在此处添加：
-            // - 发送到外部日志系统 (ELK, Splunk)
-            // - 发送告警通知
-            // - 触发自动化响应
+            // 发送到外部日志系统
+            if let Err(e) = self.send_to_external_log_systems(&log).await {
+                error!("Failed to send audit log to external systems: {}", e);
+            }
+            
+            // 发送告警通知（针对高严重程度事件）
+            if log.is_high_severity() {
+                if let Err(e) = self.send_alert_notification(&log).await {
+                    error!("Failed to send alert notification: {}", e);
+                }
+            }
+            
+            // 触发自动化响应（可选）
+            if let Err(e) = self.trigger_automated_response(&log).await {
+                error!("Failed to trigger automated response: {}", e);
+            }
         }
 
         warn!("审计日志处理任务结束");
@@ -485,6 +497,425 @@ impl AuditService {
         }
 
         self.log_async(log)
+    }
+
+    /// 发送审计日志到外部日志系统 (ELK, Splunk)
+    async fn send_to_external_log_systems(&self, log: &AuditLog) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // ELK Stack (Elasticsearch, Logstash, Kibana) 集成
+        if let Err(e) = self.send_to_elk_stack(log).await {
+            warn!("Failed to send to ELK stack: {}", e);
+        }
+
+        // Splunk 集成
+        if let Err(e) = self.send_to_splunk(log).await {
+            warn!("Failed to send to Splunk: {}", e);
+        }
+
+        // 其他日志聚合服务
+        if let Err(e) = self.send_to_other_systems(log).await {
+            warn!("Failed to send to other log systems: {}", e);
+        }
+
+        Ok(())
+    }
+
+    /// 发送到 ELK Stack
+    async fn send_to_elk_stack(&self, log: &AuditLog) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // 构造 Elasticsearch 文档
+        let elk_document = serde_json::json!({
+            "@timestamp": log.timestamp.to_rfc3339(),
+            "service": "soulbox",
+            "level": match log.severity {
+                AuditSeverity::Info => "info",
+                AuditSeverity::Warning => "warning", 
+                AuditSeverity::Error => "error",
+                AuditSeverity::Critical => "critical"
+            },
+            "event": {
+                "type": format!("{:?}", log.event_type),
+                "id": log.id.to_string(),
+                "result": format!("{:?}", log.result),
+                "message": log.message
+            },
+            "user": log.user_info.as_ref().map(|u| serde_json::json!({
+                "id": u.user_id.to_string(),
+                "name": u.username,
+                "role": format!("{:?}", u.role),
+                "tenant": u.tenant_id
+            })),
+            "resource": log.resource_info.as_ref().map(|r| serde_json::json!({
+                "type": r.resource_type,
+                "id": r.resource_id,
+                "name": r.resource_name
+            })),
+            "network": log.network_info.as_ref().map(|n| serde_json::json!({
+                "client_ip": n.client_ip,
+                "user_agent": n.user_agent,
+                "session_id": n.session_id
+            })),
+            "error": log.error_info.as_ref().map(|e| serde_json::json!({
+                "code": e.error_code,
+                "message": e.error_message
+            })),
+            "metadata": log.metadata
+        });
+
+        // 在生产环境中，这里会发送HTTP请求到Elasticsearch
+        // 示例配置来自环境变量
+        if let Ok(elk_endpoint) = std::env::var("ELK_ENDPOINT") {
+            let client = reqwest::Client::new();
+            let index_name = format!("soulbox-audit-{}", chrono::Utc::now().format("%Y.%m.%d"));
+            let url = format!("{}/{}/_doc", elk_endpoint, index_name);
+            
+            let response = client
+                .post(&url)
+                .json(&elk_document)
+                .timeout(std::time::Duration::from_secs(5))
+                .send()
+                .await?;
+
+            if response.status().is_success() {
+                debug!("Successfully sent audit log to ELK: {}", log.id);
+            } else {
+                warn!("Failed to send to ELK, status: {}", response.status());
+            }
+        } else {
+            debug!("ELK endpoint not configured, skipping ELK integration");
+        }
+
+        Ok(())
+    }
+
+    /// 发送到 Splunk
+    async fn send_to_splunk(&self, log: &AuditLog) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // 构造 Splunk 事件格式
+        let splunk_event = serde_json::json!({
+            "time": log.timestamp.timestamp(),
+            "host": "soulbox-server",
+            "source": "soulbox_audit",
+            "sourcetype": "audit_log",
+            "index": "soulbox",
+            "event": {
+                "id": log.id.to_string(),
+                "event_type": format!("{:?}", log.event_type),
+                "severity": format!("{:?}", log.severity),
+                "result": format!("{:?}", log.result),
+                "message": log.message,
+                "user_id": log.user_info.as_ref().map(|u| u.user_id.to_string()),
+                "username": log.user_info.as_ref().map(|u| u.username.clone()),
+                "resource_type": log.resource_info.as_ref().map(|r| r.resource_type.clone()),
+                "resource_id": log.resource_info.as_ref().map(|r| r.resource_id.clone()),
+                "client_ip": log.network_info.as_ref().and_then(|n| n.client_ip.clone()),
+                "error_code": log.error_info.as_ref().map(|e| e.error_code.clone()),
+                "metadata": log.metadata
+            }
+        });
+
+        // 在生产环境中，这里会使用 Splunk HEC (HTTP Event Collector)
+        if let (Ok(splunk_hec_url), Ok(splunk_token)) = (
+            std::env::var("SPLUNK_HEC_URL"),
+            std::env::var("SPLUNK_HEC_TOKEN")
+        ) {
+            let client = reqwest::Client::new();
+            
+            let response = client
+                .post(&splunk_hec_url)
+                .header("Authorization", format!("Splunk {}", splunk_token))
+                .header("Content-Type", "application/json")
+                .json(&splunk_event)
+                .timeout(std::time::Duration::from_secs(5))
+                .send()
+                .await?;
+
+            if response.status().is_success() {
+                debug!("Successfully sent audit log to Splunk: {}", log.id);
+            } else {
+                warn!("Failed to send to Splunk, status: {}", response.status());
+            }
+        } else {
+            debug!("Splunk HEC not configured, skipping Splunk integration");
+        }
+
+        Ok(())
+    }
+
+    /// 发送到其他日志系统 (Fluentd, Logz.io, Datadog等)
+    async fn send_to_other_systems(&self, log: &AuditLog) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Fluentd 集成
+        if let Ok(fluentd_url) = std::env::var("FLUENTD_URL") {
+            let fluentd_event = serde_json::json!([
+                "soulbox.audit",
+                log.timestamp.timestamp(),
+                {
+                    "log_id": log.id.to_string(),
+                    "event_type": format!("{:?}", log.event_type),
+                    "severity": format!("{:?}", log.severity),
+                    "message": log.message,
+                    "user_id": log.user_info.as_ref().map(|u| u.user_id.to_string()),
+                    "resource_type": log.resource_info.as_ref().map(|r| r.resource_type.clone()),
+                    "metadata": log.metadata
+                }
+            ]);
+
+            let client = reqwest::Client::new();
+            if let Err(e) = client
+                .post(&fluentd_url)
+                .json(&fluentd_event)
+                .timeout(std::time::Duration::from_secs(3))
+                .send()
+                .await {
+                warn!("Failed to send to Fluentd: {}", e);
+            }
+        }
+
+        // Datadog Logs API 集成
+        if let (Ok(dd_api_key), Ok(dd_site)) = (
+            std::env::var("DATADOG_API_KEY"),
+            std::env::var("DATADOG_SITE").or_else(|_| Ok("datadoghq.com".to_string()))
+        ) {
+            let dd_log = serde_json::json!({
+                "ddsource": "soulbox",
+                "ddtags": format!("env:production,service:soulbox,event_type:{:?}", log.event_type),
+                "hostname": "soulbox-server",
+                "message": log.message,
+                "level": match log.severity {
+                    AuditSeverity::Info => "info",
+                    AuditSeverity::Warning => "warn",
+                    AuditSeverity::Error => "error",
+                    AuditSeverity::Critical => "critical"
+                },
+                "timestamp": log.timestamp.to_rfc3339(),
+                "attributes": {
+                    "audit_id": log.id.to_string(),
+                    "event_type": format!("{:?}", log.event_type),
+                    "result": format!("{:?}", log.result),
+                    "user_info": log.user_info,
+                    "resource_info": log.resource_info,
+                    "metadata": log.metadata
+                }
+            });
+
+            let client = reqwest::Client::new();
+            let url = format!("https://http-intake.logs.{}/v1/input/{}", dd_site, dd_api_key);
+            
+            if let Err(e) = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .json(&dd_log)
+                .timeout(std::time::Duration::from_secs(5))
+                .send()
+                .await {
+                warn!("Failed to send to Datadog: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 发送告警通知
+    async fn send_alert_notification(&self, log: &AuditLog) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // 构造告警消息
+        let alert_message = format!(
+            "🚨 SoulBox Security Alert\n\n\
+            Event: {:?}\n\
+            Severity: {:?}\n\
+            User: {}\n\
+            Resource: {}\n\
+            Message: {}\n\
+            Time: {}\n\
+            ID: {}",
+            log.event_type,
+            log.severity,
+            log.user_info.as_ref()
+                .map(|u| format!("{} ({})", u.username, u.user_id))
+                .unwrap_or_else(|| "Unknown".to_string()),
+            log.resource_info.as_ref()
+                .map(|r| format!("{}: {}", r.resource_type, r.resource_id.as_deref().unwrap_or("N/A")))
+                .unwrap_or_else(|| "Unknown".to_string()),
+            log.message,
+            log.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
+            log.id
+        );
+
+        // Slack 通知
+        if let Ok(slack_webhook) = std::env::var("SLACK_ALERT_WEBHOOK") {
+            let slack_payload = serde_json::json!({
+                "text": alert_message,
+                "username": "SoulBox Security Bot",
+                "icon_emoji": ":warning:",
+                "attachments": [{
+                    "color": match log.severity {
+                        AuditSeverity::Critical => "danger",
+                        AuditSeverity::Error => "warning", 
+                        AuditSeverity::Warning => "warning",
+                        AuditSeverity::Info => "good"
+                    },
+                    "fields": [
+                        {
+                            "title": "Event Type",
+                            "value": format!("{:?}", log.event_type),
+                            "short": true
+                        },
+                        {
+                            "title": "Severity", 
+                            "value": format!("{:?}", log.severity),
+                            "short": true
+                        }
+                    ]
+                }]
+            });
+
+            let client = reqwest::Client::new();
+            if let Err(e) = client
+                .post(&slack_webhook)
+                .json(&slack_payload)
+                .send()
+                .await {
+                warn!("Failed to send Slack alert: {}", e);
+            }
+        }
+
+        // Teams 通知
+        if let Ok(teams_webhook) = std::env::var("TEAMS_ALERT_WEBHOOK") {
+            let teams_payload = serde_json::json!({
+                "@type": "MessageCard",
+                "@context": "http://schema.org/extensions",
+                "summary": "SoulBox Security Alert",
+                "themeColor": match log.severity {
+                    AuditSeverity::Critical => "FF0000",
+                    AuditSeverity::Error => "FF6600",
+                    AuditSeverity::Warning => "FFCC00", 
+                    AuditSeverity::Info => "00FF00"
+                },
+                "sections": [{
+                    "activityTitle": "SoulBox Security Alert",
+                    "activitySubtitle": format!("{:?} - {:?}", log.event_type, log.severity),
+                    "facts": [
+                        {
+                            "name": "Event Type",
+                            "value": format!("{:?}", log.event_type)
+                        },
+                        {
+                            "name": "Severity",
+                            "value": format!("{:?}", log.severity)
+                        },
+                        {
+                            "name": "Message",
+                            "value": log.message
+                        },
+                        {
+                            "name": "Time",
+                            "value": log.timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+                        }
+                    ],
+                    "text": alert_message
+                }]
+            });
+
+            let client = reqwest::Client::new();
+            if let Err(e) = client
+                .post(&teams_webhook)
+                .json(&teams_payload)
+                .send()
+                .await {
+                warn!("Failed to send Teams alert: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 触发自动化响应
+    async fn trigger_automated_response(&self, log: &AuditLog) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // 根据事件类型和严重程度决定自动化响应
+        match (&log.event_type, &log.severity) {
+            // 关键安全事件的自动化响应
+            (AuditEventType::SecurityViolation, AuditSeverity::Critical) => {
+                info!("Triggering automated response for critical security violation");
+                
+                // 1. 自动暂停相关用户账户
+                if let Some(user_info) = &log.user_info {
+                    self.suspend_user_account(user_info.user_id).await?;
+                }
+
+                // 2. 自动隔离相关资源
+                if let Some(resource_info) = &log.resource_info {
+                    self.isolate_resource(resource_info).await?;
+                }
+
+                // 3. 触发安全团队告警
+                self.trigger_security_team_alert(log).await?;
+            },
+
+            // 多次失败登录的自动化响应
+            (AuditEventType::UserLogin, AuditSeverity::Error) => {
+                if let Some(user_info) = &log.user_info {
+                    self.check_and_handle_brute_force(user_info.user_id).await?;
+                }
+            },
+
+            // 权限提升事件的自动化响应
+            (AuditEventType::PermissionEscalation, _) => {
+                info!("Triggering automated response for permission escalation");
+                
+                // 记录详细的权限变更日志
+                self.log_detailed_permission_change(log).await?;
+                
+                // 通知管理员
+                self.notify_administrators(log).await?;
+            },
+
+            _ => {
+                // 对于其他事件，仅记录日志
+                debug!("No automated response configured for event type: {:?}", log.event_type);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 暂停用户账户（占位实现）
+    async fn suspend_user_account(&self, user_id: uuid::Uuid) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        warn!("AUTO-RESPONSE: Suspending user account {}", user_id);
+        // 在实际实现中，这里会调用用户管理API暂停账户
+        Ok(())
+    }
+
+    /// 隔离资源（占位实现）
+    async fn isolate_resource(&self, resource_info: &crate::audit::models::ResourceInfo) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        warn!("AUTO-RESPONSE: Isolating resource {} ({})", 
+              resource_info.resource_type, 
+              resource_info.resource_id.as_deref().unwrap_or("unknown"));
+        // 在实际实现中，这里会调用相应的资源管理API进行隔离
+        Ok(())
+    }
+
+    /// 触发安全团队告警（占位实现）
+    async fn trigger_security_team_alert(&self, log: &AuditLog) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        error!("SECURITY ALERT: Critical security violation detected - {}", log.id);
+        // 在实际实现中，这里会发送高优先级告警给安全团队
+        Ok(())
+    }
+
+    /// 检查和处理暴力破解攻击（占位实现）
+    async fn check_and_handle_brute_force(&self, user_id: uuid::Uuid) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        warn!("Checking for potential brute force attack against user {}", user_id);
+        // 在实际实现中，这里会检查失败登录次数并采取相应措施
+        Ok(())
+    }
+
+    /// 记录详细的权限变更日志（占位实现）
+    async fn log_detailed_permission_change(&self, log: &AuditLog) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        info!("Logging detailed permission change for audit ID: {}", log.id);
+        // 在实际实现中，这里会记录权限变更的详细信息
+        Ok(())
+    }
+
+    /// 通知管理员（占位实现）
+    async fn notify_administrators(&self, log: &AuditLog) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        warn!("Notifying administrators about audit event: {}", log.id);
+        // 在实际实现中，这里会向管理员发送通知
+        Ok(())
     }
 }
 

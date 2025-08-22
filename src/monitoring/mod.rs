@@ -8,6 +8,9 @@ pub mod collectors;
 pub mod alerts;
 pub mod dashboard;
 
+#[cfg(test)]
+pub mod tests;
+
 /// Monitoring configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitoringConfig {

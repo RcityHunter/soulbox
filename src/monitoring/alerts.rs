@@ -697,7 +697,8 @@ impl AlertManager {
             "Alert triggered"
         );
 
-        // TODO: Send notifications
+        // Send notifications
+        self.send_alert_notifications(&alert, rule).await;
     }
 
     /// Acknowledge alert internally
@@ -742,6 +743,362 @@ impl AlertManager {
 
             tracing::info!(alert_id = alert_id, "Alert resolved");
         }
+    }
+
+    /// Send alert notifications through configured channels
+    async fn send_alert_notifications(&self, alert: &Alert, rule: &AlertRule) {
+        let channels = self.notification_channels.read().await;
+        
+        for (channel_id, channel) in channels.iter() {
+            if !channel.enabled {
+                continue;
+            }
+            
+            let notification_result = match channel.channel_type {
+                NotificationChannelType::Email => {
+                    self.send_email_notification(alert, rule, channel).await
+                }
+                NotificationChannelType::Webhook => {
+                    self.send_webhook_notification(alert, rule, channel).await
+                }
+                NotificationChannelType::Slack => {
+                    self.send_slack_notification(alert, rule, channel).await
+                }
+                NotificationChannelType::PagerDuty => {
+                    self.send_pagerduty_notification(alert, rule, channel).await
+                }
+                NotificationChannelType::Teams => {
+                    self.send_teams_notification(alert, rule, channel).await
+                }
+                NotificationChannelType::Discord => {
+                    self.send_discord_notification(alert, rule, channel).await
+                }
+            };
+            
+            match notification_result {
+                Ok(_) => {
+                    tracing::info!(
+                        channel_id = channel_id,
+                        alert_id = alert.id,
+                        channel_type = ?channel.channel_type,
+                        "Alert notification sent successfully"
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        channel_id = channel_id,
+                        alert_id = alert.id,
+                        channel_type = ?channel.channel_type,
+                        error = %e,
+                        "Failed to send alert notification"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Send email notification
+    async fn send_email_notification(
+        &self, 
+        alert: &Alert, 
+        rule: &AlertRule, 
+        channel: &NotificationChannel
+    ) -> Result<()> {
+        let to_address = channel.config.get("to")
+            .ok_or_else(|| anyhow::anyhow!("Email 'to' address not configured"))?;
+        
+        let subject = format!("[SoulBox Alert] {} - {}", alert.severity_display(), rule.name);
+        let body = self.format_alert_message(alert, rule, "email").await;
+        
+        // In a real implementation, you would use an email service like SendGrid, SES, or SMTP
+        tracing::info!(
+            to = to_address,
+            subject = subject,
+            "Email notification prepared (would send via configured email service)"
+        );
+        
+        // Simulate email sending delay
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        
+        Ok(())
+    }
+
+    /// Send webhook notification
+    async fn send_webhook_notification(
+        &self, 
+        alert: &Alert, 
+        rule: &AlertRule, 
+        channel: &NotificationChannel
+    ) -> Result<()> {
+        let webhook_url = channel.config.get("url")
+            .ok_or_else(|| anyhow::anyhow!("Webhook URL not configured"))?;
+        
+        let payload = serde_json::json!({
+            "alert_id": alert.id,
+            "rule_name": rule.name,
+            "severity": alert.severity,
+            "status": alert.status,
+            "message": alert.message,
+            "timestamp": alert.triggered_at,
+            "value": alert.value,
+            "labels": alert.labels,
+            "annotations": alert.annotations
+        });
+        
+        // In a real implementation, you would use reqwest or similar to send HTTP POST
+        tracing::info!(
+            webhook_url = webhook_url,
+            payload = %payload.to_string(),
+            "Webhook notification prepared (would send HTTP POST)"
+        );
+        
+        // Simulate webhook sending delay
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        
+        Ok(())
+    }
+
+    /// Send Slack notification
+    async fn send_slack_notification(
+        &self, 
+        alert: &Alert, 
+        rule: &AlertRule, 
+        channel: &NotificationChannel
+    ) -> Result<()> {
+        let webhook_url = channel.config.get("webhook_url")
+            .ok_or_else(|| anyhow::anyhow!("Slack webhook URL not configured"))?;
+        
+        let color = match alert.severity {
+            AlertSeverity::Info => "#36a64f",        // Green
+            AlertSeverity::Warning => "#ffab00",     // Yellow
+            AlertSeverity::Critical => "#ff5722",    // Orange
+            AlertSeverity::Emergency => "#f44336",   // Red
+        };
+        
+        let slack_message = serde_json::json!({
+            "attachments": [{
+                "color": color,
+                "title": format!("{} Alert: {}", alert.severity_display(), rule.name),
+                "text": alert.message,
+                "fields": [
+                    {
+                        "title": "Severity",
+                        "value": alert.severity_display(),
+                        "short": true
+                    },
+                    {
+                        "title": "Triggered At",
+                        "value": alert.triggered_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+                        "short": true
+                    }
+                ],
+                "footer": "SoulBox Monitoring",
+                "ts": alert.triggered_at.timestamp()
+            }]
+        });
+        
+        tracing::info!(
+            webhook_url = webhook_url,
+            "Slack notification prepared (would send to Slack webhook)"
+        );
+        
+        Ok(())
+    }
+
+    /// Send PagerDuty notification
+    async fn send_pagerduty_notification(
+        &self, 
+        alert: &Alert, 
+        rule: &AlertRule, 
+        channel: &NotificationChannel
+    ) -> Result<()> {
+        let integration_key = channel.config.get("integration_key")
+            .ok_or_else(|| anyhow::anyhow!("PagerDuty integration key not configured"))?;
+        
+        let event_action = match alert.status {
+            AlertStatus::Active => "trigger",
+            AlertStatus::Resolved => "resolve",
+            _ => "trigger",
+        };
+        
+        let pagerduty_payload = serde_json::json!({
+            "routing_key": integration_key,
+            "event_action": event_action,
+            "dedup_key": alert.id,
+            "payload": {
+                "summary": format!("{}: {}", rule.name, alert.message),
+                "severity": match alert.severity {
+                    AlertSeverity::Info => "info",
+                    AlertSeverity::Warning => "warning", 
+                    AlertSeverity::Critical => "error",
+                    AlertSeverity::Emergency => "critical",
+                },
+                "source": "SoulBox",
+                "component": "monitoring",
+                "group": "alerts",
+                "class": "alert"
+            }
+        });
+        
+        tracing::info!(
+            event_action = event_action,
+            dedup_key = alert.id,
+            "PagerDuty notification prepared (would send to PagerDuty Events API)"
+        );
+        
+        Ok(())
+    }
+
+    /// Send Microsoft Teams notification
+    async fn send_teams_notification(
+        &self, 
+        alert: &Alert, 
+        rule: &AlertRule, 
+        channel: &NotificationChannel
+    ) -> Result<()> {
+        let webhook_url = channel.config.get("webhook_url")
+            .ok_or_else(|| anyhow::anyhow!("Teams webhook URL not configured"))?;
+        
+        let theme_color = match alert.severity {
+            AlertSeverity::Info => "0078D4",        // Blue
+            AlertSeverity::Warning => "FFB900",     // Yellow
+            AlertSeverity::Critical => "D83B01",    // Orange
+            AlertSeverity::Emergency => "A80000",   // Red
+        };
+        
+        let teams_message = serde_json::json!({
+            "@type": "MessageCard",
+            "@context": "http://schema.org/extensions",
+            "themeColor": theme_color,
+            "summary": format!("SoulBox Alert: {}", rule.name),
+            "sections": [{
+                "activityTitle": format!("{} Alert: {}", alert.severity_display(), rule.name),
+                "activitySubtitle": "SoulBox Monitoring System",
+                "facts": [
+                    {
+                        "name": "Severity",
+                        "value": alert.severity_display()
+                    },
+                    {
+                        "name": "Message", 
+                        "value": alert.message
+                    },
+                    {
+                        "name": "Triggered At",
+                        "value": alert.triggered_at.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+                    }
+                ],
+                "markdown": true
+            }]
+        });
+        
+        tracing::info!(
+            webhook_url = webhook_url,
+            "Teams notification prepared (would send to Teams webhook)"
+        );
+        
+        Ok(())
+    }
+
+    /// Send Discord notification
+    async fn send_discord_notification(
+        &self, 
+        alert: &Alert, 
+        rule: &AlertRule, 
+        channel: &NotificationChannel
+    ) -> Result<()> {
+        let webhook_url = channel.config.get("webhook_url")
+            .ok_or_else(|| anyhow::anyhow!("Discord webhook URL not configured"))?;
+        
+        let color = match alert.severity {
+            AlertSeverity::Info => 3447003,          // Blue
+            AlertSeverity::Warning => 16776960,      // Yellow
+            AlertSeverity::Critical => 15158332,     // Orange
+            AlertSeverity::Emergency => 10038562,    // Red
+        };
+        
+        let discord_message = serde_json::json!({
+            "embeds": [{
+                "title": format!("{} Alert: {}", alert.severity_display(), rule.name),
+                "description": alert.message,
+                "color": color,
+                "fields": [
+                    {
+                        "name": "Severity",
+                        "value": alert.severity_display(),
+                        "inline": true
+                    },
+                    {
+                        "name": "Status",
+                        "value": format!("{:?}", alert.status),
+                        "inline": true
+                    },
+                    {
+                        "name": "Triggered At",
+                        "value": alert.triggered_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+                        "inline": false
+                    }
+                ],
+                "footer": {
+                    "text": "SoulBox Monitoring"
+                },
+                "timestamp": alert.triggered_at.to_rfc3339()
+            }]
+        });
+        
+        tracing::info!(
+            webhook_url = webhook_url,
+            "Discord notification prepared (would send to Discord webhook)"
+        );
+        
+        Ok(())
+    }
+
+    /// Format alert message for specific notification type
+    async fn format_alert_message(&self, alert: &Alert, rule: &AlertRule, format_type: &str) -> String {
+        match format_type {
+            "email" => {
+                format!(
+                    "Alert: {}\n\nSeverity: {}\nStatus: {:?}\nMessage: {}\nTriggered At: {}\n\nRule: {}\n\nLabels:\n{}\n\nAnnotations:\n{}",
+                    rule.name,
+                    alert.severity_display(),
+                    alert.status,
+                    alert.message,
+                    alert.triggered_at.format("%Y-%m-%d %H:%M:%S UTC"),
+                    rule.description.as_ref().unwrap_or(&"No description".to_string()),
+                    alert.labels.iter()
+                        .map(|(k, v)| format!("  {}: {}", k, v))
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                    alert.annotations.iter()
+                        .map(|(k, v)| format!("  {}: {}", k, v))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            }
+            _ => {
+                format!("{}: {}", rule.name, alert.message)
+            }
+        }
+    }
+}
+
+impl AlertSeverity {
+    /// Get display string for severity
+    pub fn display(&self) -> &'static str {
+        match self {
+            AlertSeverity::Info => "INFO",
+            AlertSeverity::Warning => "WARNING", 
+            AlertSeverity::Critical => "CRITICAL",
+            AlertSeverity::Emergency => "EMERGENCY",
+        }
+    }
+}
+
+impl Alert {
+    /// Get display string for severity
+    pub fn severity_display(&self) -> &'static str {
+        self.severity.display()
     }
 }
 

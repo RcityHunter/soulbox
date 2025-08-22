@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 use base64::Engine;
 use std::{sync::Arc, collections::HashMap};
 use uuid::Uuid;
+use tracing::error;
 
 use crate::auth::middleware::AuthExtractor;
 use crate::auth::models::Permission;
@@ -157,20 +158,57 @@ pub async fn download_file(
     let _sandbox_uuid = Uuid::parse_str(&sandbox_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid sandbox ID"}))))?;
 
-    // TODO: Get actual SandboxFileSystem instance and read file
-    // For now, return a mock response
+    // Get sandbox filesystem instance
+    let sandbox_fs = state.filesystem_manager
+        .create_sandbox_filesystem(&sandbox_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to create sandbox filesystem: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to access sandbox filesystem"})))
+        })?;
+
+    // Read the file content
+    let file_content = sandbox_fs
+        .read_file(&file_path)
+        .await
+        .map_err(|e| {
+            error!("Failed to read file '{}': {}", file_path, e);
+            if e.to_string().contains("not found") {
+                (StatusCode::NOT_FOUND, Json(json!({"error": "File not found"})))
+            } else {
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to read file"})))
+            }
+        })?;
+
+    // Convert content to requested encoding
     let encoding = params.encoding.unwrap_or_else(|| "base64".to_string());
-    let mock_content = if encoding == "text" {
-        "Hello, World!".to_string()
+    let content_str = match encoding.as_str() {
+        "text" => {
+            // Try to convert to UTF-8 string, fallback to base64 if not valid UTF-8
+            match String::from_utf8(file_content.clone()) {
+                Ok(text) => text,
+                Err(_) => {
+                    // If not valid UTF-8, return base64 and update encoding
+                    base64::engine::general_purpose::STANDARD.encode(&file_content)
+                }
+            }
+        }
+        "base64" | _ => {
+            base64::engine::general_purpose::STANDARD.encode(&file_content)
+        }
+    };
+
+    let actual_encoding = if encoding == "text" && !String::from_utf8(file_content.clone()).is_ok() {
+        "base64"
     } else {
-        base64::engine::general_purpose::STANDARD.encode("Hello, World!")
+        &encoding
     };
 
     let response = json!({
         "path": file_path,
-        "content": mock_content,
-        "encoding": encoding,
-        "size": 13
+        "content": content_str,
+        "encoding": actual_encoding,
+        "size": file_content.len()
     });
 
     Ok(Json(response))
@@ -186,8 +224,28 @@ pub async fn delete_file(
     let _sandbox_uuid = Uuid::parse_str(&sandbox_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid sandbox ID"}))))?;
 
-    // TODO: Get actual SandboxFileSystem instance and delete file
-    
+    // Get sandbox filesystem instance
+    let sandbox_fs = state.filesystem_manager
+        .create_sandbox_filesystem(&sandbox_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to create sandbox filesystem: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to access sandbox filesystem"})))
+        })?;
+
+    // Delete the file
+    sandbox_fs
+        .delete_file(&file_path)
+        .await
+        .map_err(|e| {
+            error!("Failed to delete file '{}': {}", file_path, e);
+            if e.to_string().contains("not found") {
+                (StatusCode::NOT_FOUND, Json(json!({"error": "File not found"})))
+            } else {
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to delete file"})))
+            }
+        })?;
+
     let response = json!({
         "message": "File deleted successfully",
         "path": file_path
@@ -198,31 +256,46 @@ pub async fn delete_file(
 
 /// List directory contents handler wrapper
 pub async fn list_directory_handler(
-    State(_state): State<AppState>,
-    axum::extract::Path((sandbox_id, dir_path)): axum::extract::Path<(String, String)>,
-) -> SoulBoxResult<Json<DirectoryListing>> {
-    list_directory(_state, sandbox_id, dir_path).await
+    State(state): State<AppState>,
+    Path((sandbox_id, dir_path)): Path<(String, String)>,
+) -> Result<Json<DirectoryListing>, (StatusCode, Json<Value>)> {
+    list_directory(state, sandbox_id, dir_path).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))))
 }
 
 /// List directory contents
 pub async fn list_directory(
-    _state: AppState,
+    state: AppState,
     sandbox_id: String,
     dir_path: String,
 ) -> std::result::Result<Json<DirectoryListing>, SoulBoxError> {
-    let _dir_path = &dir_path;
-    
     // Validate sandbox_id is a valid UUID
     let _sandbox_uuid = Uuid::parse_str(&sandbox_id)
         .map_err(|_| SoulBoxError::validation("Invalid sandbox ID".to_string()))?;
 
-    // TODO: Get actual SandboxFileSystem instance and list directory
-    // For now, return a mock response
-    let mock_listing = DirectoryListing {
-        entries: vec![], // Empty directory
-    };
+    // Get sandbox filesystem instance
+    let sandbox_fs = state.filesystem_manager
+        .create_sandbox_filesystem(&sandbox_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to create sandbox filesystem: {}", e);
+            SoulBoxError::Internal(format!("Failed to access sandbox filesystem: {}", e))
+        })?;
 
-    Ok(Json(mock_listing))
+    // List directory contents
+    let directory_listing = sandbox_fs
+        .list_directory(&dir_path)
+        .await
+        .map_err(|e| {
+            error!("Failed to list directory '{}': {}", dir_path, e);
+            if e.to_string().contains("not found") {
+                SoulBoxError::not_found(format!("Directory not found: {}", dir_path))
+            } else {
+                SoulBoxError::Internal(format!("Failed to list directory: {}", e))
+            }
+        })?;
+
+    Ok(Json(directory_listing))
 }
 
 /// Create a directory
@@ -236,12 +309,35 @@ pub async fn create_directory(
     let _sandbox_uuid = Uuid::parse_str(&sandbox_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid sandbox ID"}))))?;
 
-    // TODO: Get actual SandboxFileSystem instance and create directory
-    
+    // Get sandbox filesystem instance
+    let sandbox_fs = state.filesystem_manager
+        .create_sandbox_filesystem(&sandbox_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to create sandbox filesystem: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to access sandbox filesystem"})))
+        })?;
+
+    // Create the directory
+    let recursive = request.recursive.unwrap_or(false);
+    sandbox_fs
+        .create_directory(&request.path, recursive)
+        .await
+        .map_err(|e| {
+            error!("Failed to create directory '{}': {}", request.path, e);
+            if e.to_string().contains("already exists") {
+                (StatusCode::CONFLICT, Json(json!({"error": "Directory already exists"})))
+            } else if e.to_string().contains("not found") && !recursive {
+                (StatusCode::BAD_REQUEST, Json(json!({"error": "Parent directory does not exist. Use recursive=true to create parent directories."})))
+            } else {
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to create directory"})))
+            }
+        })?;
+
     let response = json!({
         "message": "Directory created successfully",
         "path": request.path,
-        "recursive": request.recursive.unwrap_or(false)
+        "recursive": recursive
     });
 
     Ok(Json(response))
@@ -249,37 +345,36 @@ pub async fn create_directory(
 
 /// Get file metadata
 pub async fn get_file_metadata(
-    State(_state): State<AppState>,
-    axum::extract::Path((sandbox_id, file_path)): axum::extract::Path<(String, String)>,
-) -> SoulBoxResult<Json<FileMetadata>> {
-    let _file_path = &file_path;
-    
+    State(state): State<AppState>,
+    Path((sandbox_id, file_path)): Path<(String, String)>,
+) -> Result<Json<FileMetadata>, (StatusCode, Json<Value>)> {
     // Validate sandbox_id is a valid UUID
     let _sandbox_uuid = Uuid::parse_str(&sandbox_id)
-        .map_err(|_| SoulBoxError::validation("Invalid sandbox ID".to_string()))?;
+        .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid sandbox ID"}))))?;
 
-    // TODO: Get actual SandboxFileSystem instance and get metadata
-    // For now, return a mock response
-    let mock_metadata = FileMetadata {
-        name: "mock_file.txt".to_string(),
-        path: _file_path.to_string(),
-        size: 0,
-        is_directory: false,
-        is_symlink: false,
-        symlink_target: None,
-        permissions: FilePermissions {
-            readable: true,
-            writable: true,
-            executable: false,
-            owner_id: 1000,  // Default user ID
-            group_id: 1000,  // Default group ID
-            mode: 0o644,     // Default file mode (readable/writable by owner, readable by others)
-        },
-        created_at: std::time::UNIX_EPOCH,
-        modified_at: std::time::UNIX_EPOCH,
-    };
+    // Get sandbox filesystem instance
+    let sandbox_fs = state.filesystem_manager
+        .create_sandbox_filesystem(&sandbox_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to create sandbox filesystem: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to access sandbox filesystem: {}", e)})))
+        })?;
 
-    Ok(Json(mock_metadata))
+    // Get file metadata
+    let file_metadata = sandbox_fs
+        .get_file_metadata(&file_path)
+        .await
+        .map_err(|e| {
+            error!("Failed to get metadata for '{}': {}", file_path, e);
+            if e.to_string().contains("not found") {
+                (StatusCode::NOT_FOUND, Json(json!({"error": format!("File not found: {}", file_path)})))
+            } else {
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to get file metadata: {}", e)})))
+            }
+        })?;
+
+    Ok(Json(file_metadata))
 }
 
 /// Update file permissions
@@ -293,15 +388,58 @@ pub async fn set_permissions(
     let _sandbox_uuid = Uuid::parse_str(&sandbox_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid sandbox ID"}))))?;
 
-    // TODO: Get actual SandboxFileSystem instance and set permissions
-    
+    // Get sandbox filesystem instance
+    let sandbox_fs = state.filesystem_manager
+        .create_sandbox_filesystem(&sandbox_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to create sandbox filesystem: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to access sandbox filesystem"})))
+        })?;
+
+    // Convert request to FilePermissions - first get current permissions to preserve other fields
+    let current_permissions = sandbox_fs
+        .get_permissions(&file_path)
+        .await
+        .map_err(|e| {
+            error!("Failed to get current permissions for '{}': {}", file_path, e);
+            if e.to_string().contains("not found") {
+                (StatusCode::NOT_FOUND, Json(json!({"error": "File not found"})))
+            } else {
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get current permissions"})))
+            }
+        })?;
+
+    // Create new permissions based on request
+    let new_permissions = FilePermissions {
+        readable: request.readable,
+        writable: request.writable,
+        executable: request.executable,
+        owner_id: current_permissions.owner_id,
+        group_id: current_permissions.group_id,
+        mode: current_permissions.mode, // Will be updated by the filesystem implementation
+    };
+
+    // Set file permissions
+    sandbox_fs
+        .set_permissions(&file_path, new_permissions.clone())
+        .await
+        .map_err(|e| {
+            error!("Failed to set permissions for '{}': {}", file_path, e);
+            if e.to_string().contains("not found") {
+                (StatusCode::NOT_FOUND, Json(json!({"error": "File not found"})))
+            } else {
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to set permissions"})))
+            }
+        })?;
+
     let response = json!({
         "message": "Permissions updated successfully",
         "path": file_path,
         "permissions": {
-            "readable": request.readable,
-            "writable": request.writable,
-            "executable": request.executable
+            "readable": new_permissions.readable,
+            "writable": new_permissions.writable,
+            "executable": new_permissions.executable
         }
     });
 
@@ -319,8 +457,30 @@ pub async fn create_symlink(
     let _sandbox_uuid = Uuid::parse_str(&sandbox_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid sandbox ID"}))))?;
 
-    // TODO: Get actual SandboxFileSystem instance and create symlink
-    
+    // Get sandbox filesystem instance
+    let sandbox_fs = state.filesystem_manager
+        .create_sandbox_filesystem(&sandbox_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to create sandbox filesystem: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to access sandbox filesystem"})))
+        })?;
+
+    // Create the symlink
+    sandbox_fs
+        .create_symlink(&request.link_path, &request.target_path)
+        .await
+        .map_err(|e| {
+            error!("Failed to create symlink '{}' -> '{}': {}", request.link_path, request.target_path, e);
+            if e.to_string().contains("already exists") {
+                (StatusCode::CONFLICT, Json(json!({"error": "File already exists at link path"})))
+            } else if e.to_string().contains("not found") {
+                (StatusCode::BAD_REQUEST, Json(json!({"error": "Parent directory does not exist"})))
+            } else {
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to create symlink"})))
+            }
+        })?;
+
     let response = json!({
         "message": "Symlink created successfully",
         "link_path": request.link_path,
@@ -340,18 +500,28 @@ pub async fn get_filesystem_stats(
     let _sandbox_uuid = Uuid::parse_str(&sandbox_id)
         .map_err(|_| (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid sandbox ID"}))))?;
 
-    // TODO: Get actual SandboxFileSystem instance and get stats
-    // For now, return mock stats
-    let mock_stats = FileSystemStats {
-        used_bytes: 1024,
-        available_bytes: 1024 * 1024 * 100, // 100MB
-        total_bytes: 1024 * 1024 * 100 + 1024,
-        file_count: 5,
-        directory_count: 3,
-        usage_percentage: 0.001,
-    };
+    // Get sandbox filesystem instance
+    let sandbox_fs = state.filesystem_manager
+        .create_sandbox_filesystem(&sandbox_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to create sandbox filesystem: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to access sandbox filesystem"})))
+        })?;
 
-    Ok(Json(mock_stats))
+    // Get disk usage statistics
+    let disk_usage = sandbox_fs
+        .get_disk_usage()
+        .await
+        .map_err(|e| {
+            error!("Failed to get disk usage for sandbox '{}': {}", sandbox_id, e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to get filesystem statistics"})))
+        })?;
+
+    // Convert DiskUsage to FileSystemStats using the From trait
+    let filesystem_stats = FileSystemStats::from(disk_usage);
+
+    Ok(Json(filesystem_stats))
 }
 
 /// Create file system routes
@@ -364,10 +534,10 @@ pub fn file_routes() -> Router<AppState> {
         
         // Directory operations
         .route("/sandboxes/{sandbox_id}/directories", post(create_directory))
-        // .route("/sandboxes/:sandbox_id/directories/:dir_path", get(list_directory_handler)) // TODO: Fix handler
+        .route("/sandboxes/{sandbox_id}/directories/{*dir_path}", get(list_directory_handler))
         
         // Metadata and permissions
-        // .route("/sandboxes/:sandbox_id/metadata/:file_path", get(get_file_metadata)) // TODO: Fix handler
+        .route("/sandboxes/{sandbox_id}/metadata/{*file_path}", get(get_file_metadata))
         .route("/sandboxes/{sandbox_id}/permissions/{*file_path}", put(set_permissions))
         
         // Advanced operations

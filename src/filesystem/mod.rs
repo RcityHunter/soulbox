@@ -4,6 +4,9 @@ pub mod watcher;
 pub mod permissions;
 pub mod isolation;
 
+#[cfg(test)]
+pub mod tests;
+
 pub use manager::FileSystemManager;
 pub use sandbox_fs::SandboxFileSystem;
 pub use watcher::{FileWatcher, FileEvent, FileEventType};

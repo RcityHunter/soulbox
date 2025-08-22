@@ -55,7 +55,7 @@ impl AuditRepository {
     
     /// 创建审计日志
     pub async fn create(&self, audit_log: &AuditLog) -> DatabaseResult<()> {
-        debug!("创建审计日志: {} - {}", audit_log.event_type, audit_log.message);
+        debug!("创建审计日志: {:?} - {}", audit_log.event_type, audit_log.message);
         
         let conn = self.pool.get_connection().await
             .map_err(|e| DatabaseError::Connection(e.to_string()))?;
@@ -168,23 +168,48 @@ impl AuditRepository {
         
         let ops = SurrealOperations::new(&conn);
         
-        let query = SurrealQueryBuilder::new("audit_logs")
-            .where_clause(format!("tenant_id = {}", uuid_to_record_id("tenants", tenant_id)))
-            .order_by("timestamp DESC");
+        let tenant_id_str = uuid_to_record_id("tenants", tenant_id);
+        let offset = page * page_size;
         
-        let pagination_result = ops.find_paginated::<SurrealAuditLog>(query, page as usize, page_size as usize).await
+        // Get audit logs with pagination
+        let mut response = conn.db()
+            .query("SELECT * FROM audit_logs WHERE tenant_id = $tenant_id ORDER BY timestamp DESC LIMIT $limit START $start")
+            .bind(("tenant_id", tenant_id_str))
+            .bind(("limit", page_size))
+            .bind(("start", offset))
+            .await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            
+        let logs: Vec<SurrealAuditLog> = response
+            .take(0)
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
         
+        // Get total count
+        let mut count_response = conn.db()
+            .query("SELECT count() FROM audit_logs WHERE tenant_id = $tenant_id GROUP ALL")
+            .bind(("tenant_id", tenant_id_str))
+            .await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            
+        let count_result: Vec<serde_json::Value> = count_response
+            .take(0)
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            
+        let total = count_result.first()
+            .and_then(|v| v.get("count"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+        
         let mut db_audit_logs = Vec::new();
-        for surreal_audit_log in pagination_result.items {
+        for surreal_audit_log in logs {
             db_audit_logs.push(self.surreal_to_db_audit_log(surreal_audit_log)?);
         }
         
         Ok(PaginatedResult::new(
             db_audit_logs,
-            pagination_result.total,
-            pagination_result.page as u32,
-            pagination_result.page_size as u32,
+            total,
+            page,
+            page_size,
         ))
     }
     
@@ -202,23 +227,47 @@ impl AuditRepository {
         
         let ops = SurrealOperations::new(&conn);
         
-        let query = SurrealQueryBuilder::new("audit_logs")
-            .where_clause(format!("event_type = '{:?}'", event_type))
-            .order_by("timestamp DESC");
+        let offset = page * page_size;
         
-        let pagination_result = ops.find_paginated::<SurrealAuditLog>(query, page as usize, page_size as usize).await
+        // Get audit logs with pagination
+        let mut response = conn.db()
+            .query("SELECT * FROM audit_logs WHERE event_type = $event_type ORDER BY timestamp DESC LIMIT $limit START $start")
+            .bind(("event_type", format!("{:?}", event_type)))
+            .bind(("limit", page_size))
+            .bind(("start", offset))
+            .await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            
+        let logs: Vec<SurrealAuditLog> = response
+            .take(0)
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
         
+        // Get total count
+        let mut count_response = conn.db()
+            .query("SELECT count() FROM audit_logs WHERE event_type = $event_type GROUP ALL")
+            .bind(("event_type", format!("{:?}", event_type)))
+            .await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            
+        let count_result: Vec<serde_json::Value> = count_response
+            .take(0)
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            
+        let total = count_result.first()
+            .and_then(|v| v.get("count"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+        
         let mut db_audit_logs = Vec::new();
-        for surreal_audit_log in pagination_result.items {
+        for surreal_audit_log in logs {
             db_audit_logs.push(self.surreal_to_db_audit_log(surreal_audit_log)?);
         }
         
         Ok(PaginatedResult::new(
             db_audit_logs,
-            pagination_result.total,
-            pagination_result.page as u32,
-            pagination_result.page_size as u32,
+            total,
+            page,
+            page_size,
         ))
     }
     
@@ -231,21 +280,22 @@ impl AuditRepository {
         
         let ops = SurrealOperations::new(&conn);
         
-        // 查找过期日志
-        let query = SurrealQueryBuilder::new("audit_logs")
-            .where_clause(format!("timestamp < time::now() - {}d", days));
-        
-        let old_logs: Vec<SurrealAuditLog> = ops.find_where(query).await
+        // 删除过期日志并返回删除数量
+        let mut response = conn.db()
+            .query("DELETE audit_logs WHERE timestamp < time::now() - $days RETURN count()")
+            .bind(("days", format!("{}d", days)))
+            .await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+            
+        let result: Vec<serde_json::Value> = response
+            .take(0)
             .map_err(|e| DatabaseError::Query(e.to_string()))?;
         
-        let count = old_logs.len() as i64;
+        let count = result.first()
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as i64;
         
         if count > 0 {
-            // 删除过期日志
-            let sql = format!("DELETE audit_logs WHERE timestamp < time::now() - {}d", days);
-            ops.query::<SurrealAuditLog>(&sql).await
-                .map_err(|e| DatabaseError::Query(e.to_string()))?;
-            
             info!("清理了 {} 条过期审计日志", count);
         }
         

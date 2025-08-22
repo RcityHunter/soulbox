@@ -8,13 +8,14 @@ use crate::auth::middleware::{AuthMiddleware, AuthExtractor};
 use crate::auth::models::Permission;
 use crate::auth::{api_key::ApiKeyManager, JwtManager};
 use crate::config::Config;
-use crate::container::{ContainerManager, ResourceLimits, NetworkConfig};
+use crate::container::{ContainerManager, ContainerRuntime, ResourceLimits, NetworkConfig};
 use crate::container::resource_limits::{MemoryLimits, CpuLimits, DiskLimits, NetworkLimits};
 use crate::database::{SurrealPool, repositories::SandboxRepository};
 use crate::database::models::DbSandbox;
 use crate::error::{Result as SoulBoxResult, SoulBoxError};
+use crate::filesystem::FileSystemManager;
 use crate::validation::InputValidator;
-use tracing::{info, error, warn};
+use tracing::{info, error, warn, debug};
 use axum::{
     extract::State,
     http::StatusCode,
@@ -39,7 +40,10 @@ pub struct AppState {
     pub audit_middleware: Arc<AuditMiddleware>,
     pub database: Option<Arc<SurrealPool>>,
     pub container_manager: Arc<ContainerManager>,
+    pub container_runtime: Arc<ContainerRuntime>,
     pub sandbox_repository: Option<Arc<SandboxRepository>>,
+    pub filesystem_manager: Arc<FileSystemManager>,
+    pub sandbox_manager: Arc<crate::SandboxManager>,
 }
 
 pub struct Server {
@@ -137,6 +141,12 @@ impl Server {
         // Initialize sandbox repository if database is available
         let sandbox_repository = database.as_ref().map(|db| Arc::new(SandboxRepository::new(db.clone())));
 
+        // Create filesystem manager
+        let filesystem_manager = Arc::new(FileSystemManager::new().await.map_err(|e| {
+            error!("Failed to create filesystem manager: {}", e);
+            SoulBoxError::Internal(format!("Failed to create filesystem manager: {}", e))
+        })?);
+
         let app_state = AppState {
             config: config.clone(),
             auth_state: auth_state.clone(),
@@ -147,6 +157,7 @@ impl Server {
             database,
             container_manager,
             sandbox_repository,
+            filesystem_manager,
         };
 
         let app = create_app(app_state);
@@ -267,19 +278,105 @@ async fn health_check() -> Json<Value> {
 }
 
 // Readiness check endpoint
-async fn readiness_check(State(_state): State<AppState>) -> Result<Json<Value>, StatusCode> {
-    // TODO: Check database connectivity, dependencies, etc.
+async fn readiness_check(State(state): State<AppState>) -> Result<Json<Value>, StatusCode> {
+    let mut checks = std::collections::HashMap::new();
+    let mut all_healthy = true;
     
-    Ok(Json(json!({
-        "status": "ready",
-        "service": "soulbox",
-        "checks": {
-            "database": "ok",
-            "redis": "ok",
-            "sandbox_manager": "ok"
+    // Check database connectivity
+    let db_status = match &state.database {
+        Some(db) => {
+            match check_database_health(db).await {
+                Ok(_) => "ok",
+                Err(e) => {
+                    warn!("Database health check failed: {}", e);
+                    all_healthy = false;
+                    "error"
+                }
+            }
         },
+        None => {
+            debug!("Database not configured");
+            "not_configured"
+        }
+    };
+    checks.insert("database", db_status);
+    
+    // Check sandbox manager
+    let sandbox_status = if state.sandbox_manager.is_available() {
+        "ok"
+    } else {
+        all_healthy = false;
+        "error"
+    };
+    checks.insert("sandbox_manager", sandbox_status);
+    
+    // Check Docker connectivity (via container runtime)
+    let docker_status = match check_docker_health(&state.container_runtime).await {
+        Ok(_) => "ok",
+        Err(e) => {
+            warn!("Docker health check failed: {}", e);
+            all_healthy = false;
+            "error"
+        }
+    };
+    checks.insert("docker", docker_status);
+    
+    // Check file system manager
+    let fs_status = if state.filesystem_manager.is_healthy().await {
+        "ok"
+    } else {
+        all_healthy = false;
+        "error"
+    };
+    checks.insert("filesystem", fs_status);
+    
+    let status_code = if all_healthy { 
+        StatusCode::OK 
+    } else { 
+        StatusCode::SERVICE_UNAVAILABLE 
+    };
+    
+    let response = Json(json!({
+        "status": if all_healthy { "ready" } else { "not_ready" },
+        "service": "soulbox",
+        "checks": checks,
         "timestamp": chrono::Utc::now().to_rfc3339()
-    })))
+    }));
+    
+    if all_healthy {
+        Ok(response)
+    } else {
+        Err(status_code)
+    }
+}
+
+// Health check helper functions
+async fn check_database_health(db: &SurrealPool) -> SoulBoxResult<()> {
+    // Simple connectivity check by running a basic query
+    let result = db.execute("SELECT * FROM ONLY $table LIMIT 1", &[("table", "sandbox".into())]).await;
+    match result {
+        Ok(_) => {
+            debug!("Database health check passed");
+            Ok(())
+        },
+        Err(e) => {
+            error!("Database health check failed: {}", e);
+            Err(SoulBoxError::Database(format!("Health check failed: {}", e)))
+        }
+    }
+}
+
+async fn check_docker_health(runtime: &ContainerRuntime) -> SoulBoxResult<()> {
+    match runtime.get_docker_version().await {
+        Ok(version) => {
+            debug!("Docker health check passed, version: {}", version);
+            Ok(())
+        },
+        Err(e) => {
+            error!("Docker health check failed: {}", e);
+            Err(SoulBoxError::Container(format!("Docker health check failed: {}", e)))
+        }
+    }
 }
 
 // Sandbox management endpoints

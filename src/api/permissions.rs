@@ -129,6 +129,7 @@ async fn list_role_permissions(
 
 /// 获取用户权限
 async fn get_user_permissions(
+    State(auth_state): State<AuthState>,
     auth: AuthExtractor,
     axum::extract::Path(user_id): axum::extract::Path<Uuid>,
 ) -> Result<Json<UserPermissionsResponse>, StatusCode> {
@@ -141,17 +142,40 @@ async fn get_user_permissions(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    // TODO: 从数据库获取用户信息
-    // 目前使用当前认证用户的信息作为演示
-    let user_permissions: Vec<Permission> = auth.0.role.permissions().into_iter().collect();
+    // Get user information from database
+    let (user_permissions, actual_user, actual_role) = if let Some(user_repo) = &auth_state.user_repository {
+        match user_repo.find_by_id(user_id).await {
+            Ok(Some(db_user)) => {
+                let domain_user = db_user.to_domain_model().map_err(|e| {
+                    warn!("Failed to convert user from database: {}", e);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+                
+                let permissions: Vec<Permission> = domain_user.role.permissions().into_iter().collect();
+                (permissions, domain_user.username, domain_user.role)
+            },
+            Ok(None) => {
+                warn!("User {} not found in database", user_id);
+                return Err(StatusCode::NOT_FOUND);
+            },
+            Err(e) => {
+                warn!("Database error getting user {}: {}", user_id, e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        }
+    } else {
+        // Fallback to current auth user info
+        let user_permissions: Vec<Permission> = auth.0.role.permissions().into_iter().collect();
+        (user_permissions, auth.0.username.clone(), auth.0.role.clone())
+    };
     
     let response = UserPermissionsResponse {
         user_id,
-        username: auth.0.username.clone(),
-        role: auth.0.role.clone(),
+        username: actual_user,
+        role: actual_role,
         permissions: user_permissions.clone(),
-        tenant_id: auth.0.tenant_id,
-        effective_permissions: user_permissions, // 未来可能包含动态权限
+        tenant_id: auth.0.tenant_id, // This could also come from the database user
+        effective_permissions: user_permissions, // Future: might include dynamic permissions
     };
 
     Ok(Json(response))
@@ -159,6 +183,7 @@ async fn get_user_permissions(
 
 /// 检查用户权限
 async fn check_permission(
+    State(auth_state): State<AuthState>,
     auth: AuthExtractor,
     Json(request): Json<PermissionCheckRequest>,
 ) -> Result<Json<PermissionCheckResponse>, StatusCode> {
@@ -170,13 +195,40 @@ async fn check_permission(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    // TODO: 从数据库获取用户信息进行权限检查
-    // 目前使用当前认证用户进行演示
-    let has_permission = auth.0.has_permission(&request.permission);
-    let reason = if has_permission {
-        format!("User has role {:?} which includes this permission", auth.0.role)
+    // Get user information from database for permission check
+    let (has_permission, user_role) = if let Some(user_repo) = &auth_state.user_repository {
+        match user_repo.find_by_id(request.user_id).await {
+            Ok(Some(db_user)) => {
+                let domain_user = db_user.to_domain_model().map_err(|e| {
+                    warn!("Failed to convert user from database: {}", e);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+                
+                let has_perm = domain_user.has_permission(&request.permission);
+                (has_perm, domain_user.role)
+            },
+            Ok(None) => {
+                warn!("User {} not found in database", request.user_id);
+                return Err(StatusCode::NOT_FOUND);
+            },
+            Err(e) => {
+                warn!("Database error getting user {}: {}", request.user_id, e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        }
     } else {
-        format!("User role {:?} does not include this permission", auth.0.role)
+        // Fallback to current auth user if checking own permissions
+        if request.user_id == auth.0.user_id {
+            (auth.0.has_permission(&request.permission), auth.0.role.clone())
+        } else {
+            return Err(StatusCode::INTERNAL_SERVER_ERROR); // Can't check other users without database
+        }
+    };
+    
+    let reason = if has_permission {
+        format!("User has role {:?} which includes this permission", user_role)
+    } else {
+        format!("User role {:?} does not include this permission", user_role)
     };
 
     let response = PermissionCheckResponse {
@@ -191,6 +243,7 @@ async fn check_permission(
 
 /// 分配角色给用户
 async fn assign_role(
+    State(auth_state): State<AuthState>,
     auth: AuthExtractor,
     Json(request): Json<AssignRoleRequest>,
 ) -> Result<Json<Value>, StatusCode> {
@@ -209,8 +262,39 @@ async fn assign_role(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    // TODO: 实现实际的角色分配逻辑
-    // 目前返回成功响应作为演示
+    // Implement actual role assignment logic
+    if let Some(user_repo) = &auth_state.user_repository {
+        match user_repo.find_by_id(request.user_id).await {
+            Ok(Some(mut db_user)) => {
+                // Update user role in the database
+                let mut domain_user = db_user.to_domain_model().map_err(|e| {
+                    warn!("Failed to convert user from database: {}", e);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+                
+                domain_user.role = request.role.clone();
+                
+                // Save the updated user back to database
+                if let Err(e) = user_repo.update(&domain_user).await {
+                    warn!("Failed to update user role: {}", e);
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                }
+                
+                info!("Successfully assigned role {:?} to user {}", request.role, request.user_id);
+            },
+            Ok(None) => {
+                warn!("User {} not found for role assignment", request.user_id);
+                return Err(StatusCode::NOT_FOUND);
+            },
+            Err(e) => {
+                warn!("Database error during role assignment: {}", e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        }
+    } else {
+        warn!("No user repository configured - role assignment not possible");
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
 
     Ok(Json(json!({
         "success": true,

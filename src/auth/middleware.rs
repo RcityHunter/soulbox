@@ -53,8 +53,8 @@ impl AuthContext {
 pub struct AuthMiddleware {
     jwt_manager: Arc<JwtManager>,
     audit_middleware: Option<Arc<AuditMiddleware>>,
-    // TODO: 添加 API Key 管理器
-    // api_key_manager: Arc<ApiKeyManager>,
+    /// API Key 管理器
+    api_key_manager: Option<Arc<crate::auth::api_key::ApiKeyManager>>,
 }
 
 impl AuthMiddleware {
@@ -62,7 +62,14 @@ impl AuthMiddleware {
         Self {
             jwt_manager,
             audit_middleware: None,
+            api_key_manager: None,
         }
+    }
+
+    /// Set API Key manager
+    pub fn with_api_key_manager(mut self, api_key_manager: Arc<crate::auth::api_key::ApiKeyManager>) -> Self {
+        self.api_key_manager = Some(api_key_manager);
+        self
     }
 
     pub fn with_audit(mut self, audit_middleware: Arc<AuditMiddleware>) -> Self {
@@ -307,9 +314,8 @@ impl AuthMiddleware {
                     .get::<AuthContext>()
                     .ok_or(StatusCode::UNAUTHORIZED)?;
 
-                // TODO: 从请求路径或参数中提取租户 ID
-                // 暂时跳过租户检查
-                let _tenant_id = uuid::Uuid::new_v4(); // 示例租户 ID
+                // Extract tenant ID from request path or headers
+                let tenant_id = extract_tenant_id_from_request(&request);
                 
                 // 检查租户访问权限
                 // if !auth_context.can_access_tenant(&tenant_id) {
@@ -324,6 +330,46 @@ impl AuthMiddleware {
             })
         }
     }
+}
+
+/// Extract tenant ID from request path parameters or headers
+fn extract_tenant_id_from_request(request: &Request) -> Option<uuid::Uuid> {
+    // Try to extract from path parameters first (e.g., /api/tenants/{tenant_id}/...)
+    if let Some(uri_path) = request.uri().path().strip_prefix("/api/tenants/") {
+        if let Some(tenant_id_str) = uri_path.split('/').next() {
+            if let Ok(tenant_id) = uuid::Uuid::parse_str(tenant_id_str) {
+                debug!("Extracted tenant ID from path: {}", tenant_id);
+                return Some(tenant_id);
+            }
+        }
+    }
+    
+    // Try to extract from query parameters (e.g., ?tenant_id=...)
+    if let Some(query) = request.uri().query() {
+        for param in query.split('&') {
+            if let Some((key, value)) = param.split_once('=') {
+                if key == "tenant_id" {
+                    if let Ok(tenant_id) = uuid::Uuid::parse_str(value) {
+                        debug!("Extracted tenant ID from query: {}", tenant_id);
+                        return Some(tenant_id);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Try to extract from X-Tenant-ID header
+    if let Some(header_value) = request.headers().get("X-Tenant-ID") {
+        if let Ok(header_str) = header_value.to_str() {
+            if let Ok(tenant_id) = uuid::Uuid::parse_str(header_str) {
+                debug!("Extracted tenant ID from header: {}", tenant_id);
+                return Some(tenant_id);
+            }
+        }
+    }
+    
+    debug!("No tenant ID found in request");
+    None
 }
 
 /// 认证提取器 - 用于处理函数中提取认证信息
@@ -366,6 +412,7 @@ where
         Ok(OptionalAuthExtractor(auth_context))
     }
 }
+
 
 #[cfg(test)]
 mod tests {

@@ -382,6 +382,7 @@ impl NodeJSRuntime {
         let mut bracket_count = 0;
         let mut in_string = false;
         let mut in_comment = false;
+        let mut in_block_comment = false;
         let mut escape_next = false;
 
         let chars: Vec<char> = code.chars().collect();
@@ -415,7 +416,19 @@ impl NodeJSRuntime {
                     in_comment = true;
                     continue;
                 } else if ch == '/' && next_ch == '*' {
-                    // TODO: Handle block comments properly
+                    in_block_comment = true;
+                    i += 1; // Skip the '*' character
+                    continue;
+                }
+            }
+            
+            // Handle end of block comment
+            if in_block_comment && ch == '*' && i < chars.len() - 1 {
+                let next_ch = chars[i + 1];
+                if next_ch == '/' {
+                    in_block_comment = false;
+                    i += 1; // Skip the '/' character
+                    continue;
                 }
             }
 
@@ -424,7 +437,7 @@ impl NodeJSRuntime {
                 continue;
             }
 
-            if in_comment {
+            if in_comment || in_block_comment {
                 continue;
             }
 

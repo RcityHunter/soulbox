@@ -137,6 +137,22 @@ impl Default for RetryConfig {
 }
 
 impl SurrealConfig {
+    /// 创建内存数据库配置
+    pub fn memory() -> Self {
+        Self {
+            protocol: SurrealProtocol::Memory,
+            endpoint: "mem://".to_string(),
+            namespace: "test".to_string(),
+            database: "test".to_string(),
+            username: None,
+            password: None,
+            pool: SurrealPoolConfig::default(),
+            run_initialization: false,
+            reset_on_startup: false,
+            retry: RetryConfig::default(),
+        }
+    }
+
     /// 从环境变量创建配置
     pub fn from_env() -> anyhow::Result<Self> {
         let endpoint = std::env::var("SURREAL_ENDPOINT")

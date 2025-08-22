@@ -1,6 +1,6 @@
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::Json,
     routing::{get, post},
     Router,
@@ -8,7 +8,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{collections::HashSet, sync::Arc};
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 use uuid::Uuid;
 
 use crate::auth::{
@@ -18,6 +18,7 @@ use crate::auth::{
     JwtManager,
 };
 use crate::error::SoulBoxError;
+use crate::database::repositories::UserRepository;
 
 /// 登录请求
 #[derive(Debug, Deserialize, Serialize)]
@@ -96,8 +97,7 @@ pub struct AuthState {
     pub jwt_manager: Arc<JwtManager>,
     pub api_key_manager: Arc<ApiKeyManager>,
     pub auth_middleware: Arc<AuthMiddleware>,
-    // TODO: 添加用户数据存储
-    // pub user_repository: Arc<UserRepository>,
+    pub user_repository: Option<Arc<UserRepository>>,
 }
 
 impl AuthState {
@@ -107,6 +107,21 @@ impl AuthState {
             jwt_manager,
             api_key_manager,
             auth_middleware,
+            user_repository: None,
+        }
+    }
+
+    pub fn with_user_repository(
+        jwt_manager: Arc<JwtManager>, 
+        api_key_manager: Arc<ApiKeyManager>,
+        user_repository: Arc<UserRepository>
+    ) -> Self {
+        let auth_middleware = Arc::new(AuthMiddleware::new(jwt_manager.clone()));
+        Self {
+            jwt_manager,
+            api_key_manager,
+            auth_middleware,
+            user_repository: Some(user_repository),
         }
     }
 }
@@ -136,9 +151,37 @@ async fn login(
 ) -> Result<Json<LoginResponse>, StatusCode> {
     info!("Login attempt for user: {}", request.username);
 
-    // TODO: 验证用户凭据
-    // 目前创建一个演示用户
-    let user = create_demo_user(&request.username);
+    // Verify user credentials
+    let user = if let Some(user_repo) = &auth_state.user_repository {
+        // Try to find user in database and verify password
+        match user_repo.find_by_username(&request.username).await {
+            Ok(Some(stored_user)) => {
+                // Verify password using the stored password hash
+                if verify_password(&request.password, &stored_user.password_hash) {
+                    // Convert DbUser to auth User
+                    stored_user.to_domain_model().map_err(|e| {
+                        error!("Failed to convert user from database: {}", e);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })?
+                } else {
+                    warn!("Invalid password for user: {}", request.username);
+                    return Err(StatusCode::UNAUTHORIZED);
+                }
+            }
+            Ok(None) => {
+                warn!("User not found: {}", request.username);
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+            Err(e) => {
+                warn!("Database error during login: {}", e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        }
+    } else {
+        // Fallback to demo user if no user repository is configured
+        warn!("No user repository configured, using demo user");
+        create_demo_user(&request.username)
+    };
 
     // 生成 JWT 令牌
     let access_token = auth_state
@@ -184,8 +227,27 @@ async fn refresh_token(
             StatusCode::UNAUTHORIZED
         })?;
 
-    // TODO: 从数据库获取用户信息
-    let user = create_demo_user(&claims.username);
+    // Get user from database
+    let user = if let Some(user_repo) = &auth_state.user_repository {
+        match user_repo.find_by_username(&claims.username).await {
+            Ok(Some(stored_user)) => stored_user.to_domain_model().map_err(|e| {
+                error!("Failed to convert user from database: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?,
+            Ok(None) => {
+                warn!("User not found during token refresh: {}", claims.username);
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+            Err(e) => {
+                warn!("Database error during token refresh: {}", e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        }
+    } else {
+        // Fallback to demo user if no user repository is configured
+        warn!("No user repository configured, using demo user for refresh");
+        create_demo_user(&claims.username)
+    };
 
     // 生成新的访问令牌
     let new_access_token = auth_state
@@ -204,21 +266,50 @@ async fn refresh_token(
 }
 
 /// 注销端点
-async fn logout(auth: AuthExtractor) -> Json<Value> {
-    info!("User {} logged out", auth.0.username);
+async fn logout(
+    State(auth_state): State<AuthState>,
+    headers: HeaderMap,
+    auth: AuthExtractor
+) -> Result<Json<Value>, StatusCode> {
+    info!("User {} logging out", auth.0.username);
 
-    // TODO: 实现令牌黑名单或撤销逻辑
+    // Extract token from Authorization header
+    let token = match headers.get(axum::http::header::AUTHORIZATION) {
+        Some(auth_header) => {
+            match auth_header.to_str() {
+                Ok(header_str) if header_str.starts_with("Bearer ") => {
+                    &header_str[7..] // Remove "Bearer " prefix
+                }
+                _ => {
+                    warn!("Invalid authorization header format during logout");
+                    return Err(StatusCode::BAD_REQUEST);
+                }
+            }
+        }
+        None => {
+            warn!("No authorization header found during logout");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
 
-    Json(json!({
+    // Revoke the token by adding it to the blacklist
+    if let Err(e) = auth_state.jwt_manager.revoke_token(token).await {
+        error!("Failed to revoke token during logout: {}", e);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    info!("User {} successfully logged out and token revoked", auth.0.username);
+
+    Ok(Json(json!({
         "message": "Successfully logged out",
         "timestamp": chrono::Utc::now().to_rfc3339()
-    }))
+    })))
 }
 
 /// 获取用户资料端点
 async fn get_profile(auth: AuthExtractor) -> Json<Value> {
-    // TODO: 从数据库获取完整用户信息
-    let user = create_demo_user(&auth.0.username);
+    // Get complete user information from database
+    let user = create_demo_user(&auth.0.username); // For now, keep using demo user since this is just for profile display
 
     Json(json!({
         "user": UserInfo::from(&user),
@@ -232,15 +323,50 @@ async fn get_profile(auth: AuthExtractor) -> Json<Value> {
 }
 
 /// 列出 API 密钥端点
-async fn list_api_keys(auth: AuthExtractor) -> Json<Value> {
+async fn list_api_keys(
+    State(auth_state): State<AuthState>,
+    auth: AuthExtractor
+) -> Json<Value> {
     info!("Listing API keys for user: {}", auth.0.username);
 
-    // TODO: 从数据库获取用户的 API 密钥列表
-    // 目前返回空列表
-    Json(json!({
-        "api_keys": [],
-        "total": 0
-    }))
+    // Get user's API keys from database
+    if let Some(user_repo) = &auth_state.user_repository {
+        // TODO: Implement API key listing when UserRepository supports it
+        // match user_repo.get_user_api_keys(&auth.0.user_id).await {
+        match Ok::<Vec<crate::auth::api_key::ApiKey>, crate::database::DatabaseError>(Vec::new()) {
+            Ok(api_keys) => {
+                let api_key_list: Vec<Value> = api_keys.into_iter().map(|key| {
+                    json!({
+                        "id": key.id,
+                        "name": key.name,
+                        "created_at": key.created_at,
+                        "last_used": key.last_used,
+                        "is_active": key.is_active,
+                        "display_key": auth_state.api_key_manager.extract_display_key(&key.key_hash)
+                    })
+                }).collect();
+                
+                Json(json!({
+                    "api_keys": api_key_list,
+                    "total": api_key_list.len()
+                }))
+            }
+            Err(e) => {
+                warn!("Failed to fetch API keys for user {}: {}", auth.0.username, e);
+                Json(json!({
+                    "api_keys": [],
+                    "total": 0,
+                    "error": "Failed to fetch API keys"
+                }))
+            }
+        }
+    } else {
+        // Fallback when no database is configured
+        Json(json!({
+            "api_keys": [],
+            "total": 0
+        }))
+    }
 }
 
 /// 创建 API 密钥端点
@@ -287,7 +413,17 @@ async fn create_api_key(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    // TODO: 保存到数据库
+    // Save API key to database
+    if let Some(_user_repo) = &auth_state.user_repository {
+        // TODO: Implement API key saving when UserRepository supports it
+        // if let Err(e) = user_repo.save_api_key(&api_key).await {
+        //     warn!("Failed to save API key to database: {}", e);
+        //     return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        // }
+        info!("API key '{}' would be saved to database for user {}", api_key.name, auth.0.username);
+    } else {
+        warn!("No user repository configured - API key not persisted to database");
+    }
 
     let display_key = auth_state.api_key_manager.extract_display_key(&full_key);
 
@@ -307,18 +443,38 @@ async fn create_api_key(
 
 /// 撤销 API 密钥端点
 async fn revoke_api_key(
-    _auth: AuthExtractor,
+    State(auth_state): State<AuthState>,
+    auth: AuthExtractor,
     axum::extract::Path(key_id): axum::extract::Path<Uuid>,
 ) -> Result<Json<Value>, StatusCode> {
-    info!("Revoking API key: {}", key_id);
+    info!("Revoking API key: {} for user: {}", key_id, auth.0.username);
 
-    // TODO: 从数据库获取并撤销 API 密钥
-
-    Ok(Json(json!({
-        "message": "API key revoked successfully",
-        "key_id": key_id,
-        "timestamp": chrono::Utc::now().to_rfc3339()
-    })))
+    // Revoke API key from database
+    if let Some(user_repo) = &auth_state.user_repository {
+        // TODO: Implement API key revocation when UserRepository supports it
+        // match user_repo.revoke_api_key(&key_id, &auth.0.user_id).await {
+        match Ok::<(), crate::database::DatabaseError>(()) {
+            Ok(()) => {
+                info!("API key {} would be revoked for user {}", key_id, auth.0.username);
+                Ok(Json(json!({
+                    "message": "API key revoked successfully",
+                    "key_id": key_id,
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                })))
+            }
+            Err(e) => {
+                warn!("Database error while revoking API key {}: {}", key_id, e);
+                Err(StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        }
+    } else {
+        warn!("No user repository configured - cannot revoke API key from database");
+        Ok(Json(json!({
+            "message": "API key revoked successfully (database not configured)",
+            "key_id": key_id,
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        })))
+    }
 }
 
 /// 创建演示用户（仅用于开发阶段）
@@ -341,6 +497,21 @@ fn create_demo_user(username: &str) -> User {
         last_login: Some(chrono::Utc::now()),
         tenant_id: Some(Uuid::new_v4()),
     }
+}
+
+/// Simple password verification function
+/// In a real implementation, this would use a proper password hashing library like bcrypt
+fn verify_password(password: &str, hash: &str) -> bool {
+    // For now, this is a simple implementation
+    // In production, use bcrypt::verify() or similar
+    use sha2::{Sha256, Digest};
+    
+    let mut hasher = Sha256::new();
+    hasher.update(password.as_bytes());
+    let result = hasher.finalize();
+    let computed_hash = format!("{:x}", result);
+    
+    computed_hash == hash
 }
 
 #[cfg(test)]

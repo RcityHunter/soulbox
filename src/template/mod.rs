@@ -19,6 +19,12 @@ pub enum TemplateError {
     #[error("Template validation failed: {0}")]
     ValidationFailed(String),
     
+    #[error("Validation error: {0}")]
+    ValidationError(String),
+    
+    #[error("Conflict error: {0}")]
+    ConflictError(String),
+    
     #[error("Template version conflict: {0}")]
     VersionConflict(String),
     
