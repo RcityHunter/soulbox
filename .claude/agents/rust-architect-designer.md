@@ -1,7 +1,7 @@
 ---
 name: rust-architect-designer
 description: Use this agent when you need to design a Rust project architecture from requirements documents, create modular system designs, establish project structure, or make architectural decisions for Rust applications. This includes analyzing business requirements, designing module hierarchies, selecting appropriate crates, defining core data structures, planning concurrency models, and providing implementation roadmaps. Examples:\n\n<example>\nContext: User needs to design architecture for a new Rust project based on requirements.\nuser: "I need to build a high-performance web scraper that can handle 10,000 concurrent requests"\nassistant: "I'll use the rust-architect-designer agent to analyze your requirements and design a comprehensive Rust architecture."\n<commentary>\nSince the user needs architectural design for a Rust project, use the rust-architect-designer agent to create the system architecture.\n</commentary>\n</example>\n\n<example>\nContext: User has a requirements document and needs Rust project structure.\nuser: "Here's my requirements doc for a distributed task queue system. Design the architecture."\nassistant: "Let me invoke the rust-architect-designer agent to analyze these requirements and create a complete Rust project architecture."\n<commentary>\nThe user has requirements that need to be translated into Rust architecture, so use the rust-architect-designer agent.\n</commentary>\n</example>
-model: sonnet
+model: opus
 color: blue
 ---
 

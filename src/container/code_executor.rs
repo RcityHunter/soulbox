@@ -3,6 +3,7 @@ use crate::container::sandbox::SandboxContainer;
 use std::sync::Arc;
 use tracing::{info, error, debug};
 use std::time::Duration;
+use base64::{Engine as _, engine::general_purpose};
 
 /// Code executor for running code inside containers
 pub struct CodeExecutor {
@@ -18,12 +19,15 @@ impl CodeExecutor {
     pub async fn execute_python(&self, code: &str, timeout: Duration) -> Result<CodeExecutionResult> {
         info!("Executing Python code in container {}", self.container.get_id());
         
-        // Write code to a temporary file in the container
+        // Encode code to base64 to prevent injection attacks
+        let encoded_code = general_purpose::STANDARD.encode(code.as_bytes());
+        
+        // Write code to a temporary file in the container using base64 decoding
         let file_path = "/tmp/code.py";
         let write_cmd = vec![
             "sh".to_string(),
             "-c".to_string(),
-            format!("cat > {} << 'EOF'\n{}\nEOF", file_path, code)
+            format!("echo '{}' | base64 -d > {}", encoded_code, file_path)
         ];
         
         // Write the code file
@@ -64,12 +68,15 @@ impl CodeExecutor {
     pub async fn execute_nodejs(&self, code: &str, timeout: Duration) -> Result<CodeExecutionResult> {
         info!("Executing Node.js code in container {}", self.container.get_id());
         
-        // Write code to a temporary file in the container
+        // Encode code to base64 to prevent injection attacks
+        let encoded_code = general_purpose::STANDARD.encode(code.as_bytes());
+        
+        // Write code to a temporary file in the container using base64 decoding
         let file_path = "/tmp/code.js";
         let write_cmd = vec![
             "sh".to_string(),
             "-c".to_string(),
-            format!("cat > {} << 'EOF'\n{}\nEOF", file_path, code)
+            format!("echo '{}' | base64 -d > {}", encoded_code, file_path)
         ];
         
         // Write the code file
@@ -110,12 +117,16 @@ impl CodeExecutor {
     pub async fn execute_shell(&self, command: &str, timeout: Duration) -> Result<CodeExecutionResult> {
         info!("Executing shell command in container {}", self.container.get_id());
         
+        // Encode command to base64 to prevent injection attacks
+        let encoded_cmd = general_purpose::STANDARD.encode(command.as_bytes());
+        
+        // Execute command using base64 decoding
         let exec_cmd = vec![
             "timeout".to_string(),
             format!("{}", timeout.as_secs()),
             "sh".to_string(),
             "-c".to_string(),
-            command.to_string()
+            format!("echo '{}' | base64 -d | sh", encoded_cmd)
         ];
         
         let start_time = std::time::Instant::now();

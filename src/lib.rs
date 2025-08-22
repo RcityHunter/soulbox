@@ -38,6 +38,8 @@ pub mod server;
 pub mod sandbox; // Re-enabled for gRPC service compatibility
 pub mod billing;
 pub mod sandbox_manager;
+pub mod zero_copy;
+pub mod lockfree;
 
 // Firecracker VM integration
 pub mod firecracker;

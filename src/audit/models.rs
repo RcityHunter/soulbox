@@ -114,6 +114,14 @@ pub struct AuditLog {
     pub tags: Option<Vec<String>>,
 }
 
+/// Resource information for audit tracking
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceInfo {
+    pub resource_type: String,
+    pub resource_id: String,
+    pub resource_name: Option<String>,
+}
+
 impl AuditLog {
     /// 创建新的审计日志条目
     pub fn new(

@@ -135,7 +135,7 @@ impl ContainerRuntime {
     pub async fn new_with_uri(uri: &str) -> Result<Self> {
         info!("Initializing Docker client with custom URI: {}", uri);
         
-        let docker = Docker::connect_with_uri(uri, 120, API_DEFAULT_VERSION)
+        let docker = Docker::connect_with_socket(uri, 120, API_DEFAULT_VERSION)
             .map_err(|e| SoulBoxError::Internal(format!("Failed to connect to Docker at {}: {}", uri, e)))?;
         
         let runtime = Self { docker };
@@ -156,7 +156,7 @@ impl ContainerRuntime {
         id: &str,
         follow: bool,
         tail: Option<&str>,
-    ) -> Result<impl futures::Stream<Item = Result<bollard::container::LogOutput, bollard::errors::Error>>> {
+    ) -> crate::error::Result<impl futures::Stream<Item = std::result::Result<bollard::container::LogOutput, bollard::errors::Error>>> {
         debug!("Getting logs for container: {} (follow: {})", id, follow);
         
         use bollard::container::LogsOptions;
@@ -169,16 +169,10 @@ impl ContainerRuntime {
             ..Default::default()
         };
 
-        match self.docker.logs(id, Some(options)).await {
-            Ok(stream) => {
-                debug!("Successfully created log stream for container: {}", id);
-                Ok(stream)
-            }
-            Err(e) => {
-                error!("Failed to get logs for container {}: {}", id, e);
-                Err(SoulBoxError::Internal(format!("Failed to get logs for container {}: {}", id, e)))
-            }
-        }
+        let stream = self.docker.logs(id, Some(options));
+        debug!("Successfully created log stream for container: {}", id);
+        Ok(stream)
+        // Note: logs() returns a stream, not a Result
     }
 }
 

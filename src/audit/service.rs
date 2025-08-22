@@ -606,12 +606,12 @@ impl AuditService {
                 "severity": format!("{:?}", log.severity),
                 "result": format!("{:?}", log.result),
                 "message": log.message,
-                "user_id": log.user_info.as_ref().map(|u| u.user_id.to_string()),
-                "username": log.user_info.as_ref().map(|u| u.username.clone()),
-                "resource_type": log.resource_info.as_ref().map(|r| r.resource_type.clone()),
-                "resource_id": log.resource_info.as_ref().map(|r| r.resource_id.clone()),
-                "client_ip": log.network_info.as_ref().and_then(|n| n.client_ip.clone()),
-                "error_code": log.error_info.as_ref().map(|e| e.error_code.clone()),
+                "user_id": log.user_id.map(|u| u.to_string()),
+                "username": log.username.clone(),
+                "resource_type": log.resource_type.clone(),
+                "resource_id": log.resource_id.clone(),
+                "client_ip": log.ip_address.clone(),
+                "error_code": log.error_code.clone(),
                 "metadata": log.metadata
             }
         });
@@ -656,7 +656,7 @@ impl AuditService {
                     "event_type": format!("{:?}", log.event_type),
                     "severity": format!("{:?}", log.severity),
                     "message": log.message,
-                    "user_id": log.user_info.as_ref().map(|u| u.user_id.to_string()),
+                    "user_id": log.user_id.map(|u| u.to_string()),
                     "resource_type": log.resource_info.as_ref().map(|r| r.resource_type.clone()),
                     "metadata": log.metadata
                 }
@@ -694,7 +694,7 @@ impl AuditService {
                     "audit_id": log.id.to_string(),
                     "event_type": format!("{:?}", log.event_type),
                     "result": format!("{:?}", log.result),
-                    "user_info": log.user_info,
+                    "user_id": log.user_id.map(|u| u.to_string()),
                     "resource_info": log.resource_info,
                     "metadata": log.metadata
                 }
@@ -731,7 +731,7 @@ impl AuditService {
             ID: {}",
             log.event_type,
             log.severity,
-            log.user_info.as_ref()
+            log.user_id.as_ref()
                 .map(|u| format!("{} ({})", u.username, u.user_id))
                 .unwrap_or_else(|| "Unknown".to_string()),
             log.resource_info.as_ref()
@@ -839,8 +839,8 @@ impl AuditService {
                 info!("Triggering automated response for critical security violation");
                 
                 // 1. 自动暂停相关用户账户
-                if let Some(user_info) = &log.user_info {
-                    self.suspend_user_account(user_info.user_id).await?;
+                if let Some(user_id) = &log.user_id {
+                    self.suspend_user_account(*user_id).await?;
                 }
 
                 // 2. 自动隔离相关资源
@@ -854,8 +854,8 @@ impl AuditService {
 
             // 多次失败登录的自动化响应
             (AuditEventType::UserLogin, AuditSeverity::Error) => {
-                if let Some(user_info) = &log.user_info {
-                    self.check_and_handle_brute_force(user_info.user_id).await?;
+                if let Some(user_id) = &log.user_id {
+                    self.check_and_handle_brute_force(*user_id).await?;
                 }
             },
 
