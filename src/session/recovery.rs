@@ -162,7 +162,7 @@ impl SessionRecoveryService {
             session: session.clone(),
             container_exists,
             container_running,
-            last_checkpoint: self.get_last_checkpoint_time(&session.id).await?
+            last_checkpoint: self.get_last_checkpoint_time(&session.id).await?,
             recovery_actions,
         })
     }

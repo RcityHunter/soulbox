@@ -37,6 +37,7 @@ pub mod filesystem;
 pub mod server;
 pub mod sandbox; // Re-enabled for gRPC service compatibility
 pub mod billing;
+pub mod sandbox_manager;
 
 // Firecracker VM integration
 pub mod firecracker;
@@ -54,7 +55,10 @@ pub use network::{NetworkManager, SandboxNetworkConfig, PortMappingManager, Prox
 pub use validation::InputValidator;
 
 // Container exports
-pub use container::{ContainerManager, SandboxContainer, ResourceLimits, NetworkConfig, PortMapping, ContainerPool, PoolConfig};
+pub use container::{ContainerManager, SandboxContainer, ResourceLimits, NetworkConfig, PortMapping, ContainerPool, PoolConfig, CodeExecutor, CodeExecutionResult};
+
+// Sandbox manager export
+pub use sandbox_manager::{SandboxManager, SandboxSummary};
 
 // Auth exports
 pub use auth::{JwtManager, Claims, ApiKeyManager, ApiKey, AuthMiddleware, User, Role, Permission};
