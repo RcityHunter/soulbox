@@ -14,3 +14,6 @@ pub use resource_limits::ResourceLimits;
 pub use network::{NetworkConfig, PortMapping};
 pub use pool::{ContainerPool, PoolConfig, PoolContainer, PoolStats};
 pub use code_executor::{CodeExecutor, CodeExecutionResult};
+
+#[cfg(test)]
+mod tests;

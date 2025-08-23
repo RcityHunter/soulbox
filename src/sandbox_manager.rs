@@ -1,5 +1,6 @@
 use crate::container::{ContainerManager, CodeExecutor, CodeExecutionResult, ResourceLimits, NetworkConfig};
 use crate::error::{Result, SoulBoxError};
+use crate::template::{Template, DockerfileParser, DockerImageBuilder};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -84,6 +85,92 @@ impl SandboxManager {
         self.active_sandboxes.write().await.insert(sandbox_id.clone(), info);
 
         info!("Sandbox {} created successfully", sandbox_id);
+        Ok(sandbox_id)
+    }
+
+    /// Create a new sandbox from a template
+    pub async fn create_sandbox_from_template(
+        &self,
+        template: &Template,
+        resource_limits: Option<ResourceLimits>,
+        network_config: Option<NetworkConfig>,
+    ) -> Result<String> {
+        let sandbox_id = Uuid::new_v4().to_string();
+        info!("Creating sandbox {} from template: {}", sandbox_id, template.metadata.name);
+
+        // Use the base image from template
+        let image = template.base_image.clone();
+
+        // Use template's resource limits or provided ones
+        let limits = resource_limits.unwrap_or_else(|| {
+            // Import the resource limit types
+            use crate::container::resource_limits::{CpuLimits, MemoryLimits, DiskLimits, NetworkLimits};
+            
+            ResourceLimits {
+                cpu: CpuLimits {
+                    cores: template.resource_limits.cpu_cores.unwrap_or(1.0),
+                    shares: Some(512),
+                    cpu_percent: Some(80.0),
+                },
+                memory: MemoryLimits {
+                    limit_mb: template.resource_limits.memory_mb.unwrap_or(512),
+                    swap_limit_mb: template.resource_limits.memory_mb.map(|m| m * 2),
+                    swap_mb: template.resource_limits.memory_mb.map(|m| m * 2),
+                },
+                disk: DiskLimits {
+                    limit_mb: template.resource_limits.disk_mb.unwrap_or(1024),
+                    iops_limit: None,
+                },
+                network: NetworkLimits {
+                    upload_bps: None,
+                    download_bps: None,
+                    max_connections: None,
+                },
+            }
+        });
+
+        let network = network_config.unwrap_or_else(|| NetworkConfig::default());
+
+        // Set up environment variables from template
+        let mut env_vars = template.environment_vars.clone();
+        env_vars.insert("SOULBOX_TEMPLATE".to_string(), template.metadata.slug.clone());
+        env_vars.insert("SOULBOX_SANDBOX_ID".to_string(), sandbox_id.clone());
+
+        // Create the container
+        let container = self.container_manager
+            .create_sandbox_container(&sandbox_id, &image, limits, network, env_vars)
+            .await?;
+
+        // Start the container
+        container.start().await?;
+
+        // Run setup commands if specified
+        if !template.setup_commands.is_empty() {
+            info!("Running setup commands for template: {}", template.metadata.name);
+            for cmd in &template.setup_commands {
+                let exec_result = container.execute_command(vec!["sh".to_string(), "-c".to_string(), cmd.clone()]).await?;
+                if exec_result.exit_code != 0 {
+                    warn!("Setup command failed: {}", cmd);
+                    error!("Setup error: {}", exec_result.stderr);
+                }
+            }
+        }
+
+        // Create code executor
+        let executor = Arc::new(CodeExecutor::new(container.clone()));
+
+        // Store sandbox info
+        let info = SandboxInfo {
+            sandbox_id: sandbox_id.clone(),
+            container_id: container.get_id().to_string(),
+            executor: executor.clone(),
+            created_at: std::time::Instant::now(),
+            language: template.metadata.runtime_type.to_string(),
+        };
+
+        self.active_sandboxes.write().await.insert(sandbox_id.clone(), info);
+
+        info!("Sandbox {} created successfully from template: {}", sandbox_id, template.metadata.name);
         Ok(sandbox_id)
     }
 

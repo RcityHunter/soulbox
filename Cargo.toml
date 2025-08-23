@@ -101,6 +101,7 @@ async-stream = "0.3"
 rust_decimal = { version = "1.37", features = ["serde"] }
 tempfile = "3.10"
 notify = "6.1"
+tar = "0.4"
 
 [build-dependencies]
 tonic-build = "0.14"

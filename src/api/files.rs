@@ -534,10 +534,10 @@ pub fn file_routes() -> Router<AppState> {
         
         // Directory operations
         .route("/sandboxes/{sandbox_id}/directories", post(create_directory))
-        .route("/sandboxes/{sandbox_id}/directories/{*dir_path}", get(list_directory_handler))
+        .route("/sandboxes/:sandbox_id/directories", get(list_directory_handler))
         
         // Metadata and permissions
-        .route("/sandboxes/{sandbox_id}/metadata/{*file_path}", get(get_file_metadata))
+        .route("/sandboxes/:sandbox_id/metadata", get(get_file_metadata))
         .route("/sandboxes/{sandbox_id}/permissions/{*file_path}", put(set_permissions))
         
         // Advanced operations

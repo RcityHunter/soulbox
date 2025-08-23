@@ -386,7 +386,8 @@ impl NodeJSRuntime {
         let mut escape_next = false;
 
         let chars: Vec<char> = code.chars().collect();
-        for i in 0..chars.len() {
+        let mut i = 0;
+        while i < chars.len() {
             let ch = chars[i];
 
             if escape_next {
@@ -458,6 +459,8 @@ impl NodeJSRuntime {
                     "Syntax error: Unmatched closing bracket/parenthesis".to_string()
                 ));
             }
+            
+            i += 1;
         }
 
         // Check for unmatched opening brackets/parentheses

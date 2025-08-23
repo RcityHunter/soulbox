@@ -7,8 +7,7 @@ use crate::error::{Result, SoulBoxError};
 pub mod persistence;
 pub mod recovery;
 
-#[cfg(test)]
-pub mod tests;
+// Tests module is defined inline below
 
 /// Session state for tracking active sandboxes and their metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]

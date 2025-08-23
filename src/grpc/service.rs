@@ -45,7 +45,7 @@ pub struct SoulBoxServiceImpl {
 
 impl SoulBoxServiceImpl {
     pub fn new() -> Result<Self, crate::error::SoulBoxError> {
-        let container_manager = Arc::new(ContainerManager::new_stub()?);
+        let container_manager = Arc::new(ContainerManager::new_default()?);
         Ok(Self {
             container_manager,
             sandboxes: Arc::new(Mutex::new(HashMap::new())),

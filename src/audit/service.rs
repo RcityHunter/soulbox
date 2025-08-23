@@ -612,7 +612,7 @@ impl AuditService {
                 "resource_id": log.resource_id.clone(),
                 "client_ip": log.ip_address.clone(),
                 "error_code": log.error_code.clone(),
-                "metadata": log.metadata
+                "details": log.details
             }
         });
 
@@ -657,8 +657,8 @@ impl AuditService {
                     "severity": format!("{:?}", log.severity),
                     "message": log.message,
                     "user_id": log.user_id.map(|u| u.to_string()),
-                    "resource_type": log.resource_info.as_ref().map(|r| r.resource_type.clone()),
-                    "metadata": log.metadata
+                    "resource_type": log.resource_type.clone(),
+                    "details": log.details
                 }
             ]);
 
@@ -695,8 +695,9 @@ impl AuditService {
                     "event_type": format!("{:?}", log.event_type),
                     "result": format!("{:?}", log.result),
                     "user_id": log.user_id.map(|u| u.to_string()),
-                    "resource_info": log.resource_info,
-                    "metadata": log.metadata
+                    "resource_type": log.resource_type.clone(),
+                    "resource_id": log.resource_id.clone(),
+                    "details": log.details
                 }
             });
 
@@ -731,11 +732,11 @@ impl AuditService {
             ID: {}",
             log.event_type,
             log.severity,
-            log.user_id.as_ref()
-                .map(|u| format!("{} ({})", u.username, u.user_id))
+            log.username.as_ref()
+                .map(|u| format!("{} ({})", u, log.user_id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "N/A".to_string())))
                 .unwrap_or_else(|| "Unknown".to_string()),
-            log.resource_info.as_ref()
-                .map(|r| format!("{}: {}", r.resource_type, r.resource_id.as_deref().unwrap_or("N/A")))
+            log.resource_type.as_ref()
+                .map(|rt| format!("{}: {}", rt, log.resource_id.as_ref().unwrap_or(&"N/A".to_string())))
                 .unwrap_or_else(|| "Unknown".to_string()),
             log.message,
             log.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
@@ -844,8 +845,13 @@ impl AuditService {
                 }
 
                 // 2. 自动隔离相关资源
-                if let Some(resource_info) = &log.resource_info {
-                    self.isolate_resource(resource_info).await?;
+                if let (Some(resource_type), Some(resource_id)) = (&log.resource_type, &log.resource_id) {
+                    let resource_info = crate::audit::models::ResourceInfo {
+                        resource_type: resource_type.clone(),
+                        resource_id: resource_id.clone(),
+                        resource_name: log.resource_name.clone(),
+                    };
+                    self.isolate_resource(&resource_info).await?;
                 }
 
                 // 3. 触发安全团队告警
@@ -860,7 +866,7 @@ impl AuditService {
             },
 
             // 权限提升事件的自动化响应
-            (AuditEventType::PermissionEscalation, _) => {
+            (AuditEventType::PermissionGranted, AuditSeverity::Critical) => {
                 info!("Triggering automated response for permission escalation");
                 
                 // 记录详细的权限变更日志
@@ -890,7 +896,7 @@ impl AuditService {
     async fn isolate_resource(&self, resource_info: &crate::audit::models::ResourceInfo) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         warn!("AUTO-RESPONSE: Isolating resource {} ({})", 
               resource_info.resource_type, 
-              resource_info.resource_id.as_deref().unwrap_or("unknown"));
+              resource_info.resource_id);
         // 在实际实现中，这里会调用相应的资源管理API进行隔离
         Ok(())
     }

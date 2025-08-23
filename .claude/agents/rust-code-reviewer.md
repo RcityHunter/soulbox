@@ -1,7 +1,7 @@
 ---
 name: rust-code-reviewer
 description: Use this agent when you need to review Rust code for quality, performance, security, and maintainability issues. This agent specializes in identifying overengineering, unnecessary abstractions, redundant code, and potential security vulnerabilities in Rust projects. Ideal for code reviews after implementing new features, refactoring existing code, or when you suspect there might be unnecessary complexity in your Rust codebase. Examples:\n\n<example>\nContext: The user has just written a new Rust module and wants it reviewed for quality and potential issues.\nuser: "I've implemented a new container management module for my project"\nassistant: "I'll review your container management module using the rust-code-reviewer agent to check for any issues with design, performance, or security."\n<commentary>\nSince new Rust code has been written, use the Task tool to launch the rust-code-reviewer agent to analyze it for potential improvements.\n</commentary>\n</example>\n\n<example>\nContext: The user is working on the SoulBox Rust project and has made changes to the codebase.\nuser: "I've refactored the gRPC service implementation"\nassistant: "Let me use the rust-code-reviewer agent to examine your refactored gRPC service for any overengineering or potential issues."\n<commentary>\nThe user has refactored Rust code, so the rust-code-reviewer agent should be used to ensure the refactoring maintains quality and doesn't introduce unnecessary complexity.\n</commentary>\n</example>
-model: sonnet
+model: opus
 color: red
 ---
 

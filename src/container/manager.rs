@@ -33,10 +33,10 @@ pub struct ContainerManager {
 }
 
 impl ContainerManager {
-    /// Create a stub container manager for testing/development
-    /// This creates a manager that can be instantiated even without Docker
-    pub fn new_stub() -> Result<Self> {
-        // Try to create a Docker client gracefully
+    /// Create a container manager with default configuration
+    /// This connects to the local Docker daemon using standard methods
+    pub fn new_default() -> Result<Self> {
+        // Connect to Docker daemon using platform-appropriate method
         let docker = Docker::connect_with_socket_defaults()
             .or_else(|_| Docker::connect_with_local_defaults())
             .map_err(|e| SoulBoxError::Container(e))?;
@@ -60,6 +60,11 @@ impl ContainerManager {
         }
     }
     
+    /// Get a reference to the Docker client
+    pub fn get_docker_client(&self) -> Arc<Docker> {
+        self.docker.clone()
+    }
+
     pub async fn new(config: Config) -> Result<Self> {
         // Initialize Docker client
         let docker = Docker::connect_with_socket_defaults()

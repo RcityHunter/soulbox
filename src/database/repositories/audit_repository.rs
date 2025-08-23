@@ -174,7 +174,7 @@ impl AuditRepository {
         // Get audit logs with pagination
         let mut response = conn.db()
             .query("SELECT * FROM audit_logs WHERE tenant_id = $tenant_id ORDER BY timestamp DESC LIMIT $limit START $start")
-            .bind(("tenant_id", tenant_id_str))
+            .bind(("tenant_id", tenant_id_str.clone()))
             .bind(("limit", page_size))
             .bind(("start", offset))
             .await
@@ -207,7 +207,7 @@ impl AuditRepository {
         
         Ok(PaginatedResult::new(
             db_audit_logs,
-            total,
+            total as i64,
             page,
             page_size,
         ))
@@ -265,7 +265,7 @@ impl AuditRepository {
         
         Ok(PaginatedResult::new(
             db_audit_logs,
-            total,
+            total as i64,
             page,
             page_size,
         ))

@@ -2,11 +2,13 @@ pub mod models;
 pub mod manager;
 pub mod storage;
 pub mod file_storage;
+pub mod dockerfile;
 
 pub use models::{Template, TemplateVersion, TemplateMetadata, TemplateValidationResult, TemplateFile, TemplateFileUpload};
 pub use manager::TemplateManager;
 pub use storage::TemplateStorage;
 pub use file_storage::TemplateFileStorage;
+pub use dockerfile::{DockerfileParser, DockerImageBuilder};
 
 use crate::error::{Result as SoulBoxResult, SoulBoxError};
 
