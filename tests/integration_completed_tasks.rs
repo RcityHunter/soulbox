@@ -88,7 +88,10 @@ async fn test_protobuf_types_are_usable() {
             enable_internet: true,
         }),
         environment_variables: std::collections::HashMap::new(),
-        timeout: Some(300),
+        timeout: Some(prost_types::Duration {
+            seconds: 300,
+            nanos: 0,
+        }),
     };
     
     // Verify fields are accessible and have expected values

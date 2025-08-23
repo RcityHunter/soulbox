@@ -30,6 +30,12 @@ pub mod template;
 // Session management
 pub mod session;
 
+// Snapshot system
+pub mod snapshot;
+
+// Monitoring and health checks
+pub mod monitoring;
+
 // Additional critical modules (re-enabling gradually)
 pub mod audit;
 pub mod validation;
@@ -44,8 +50,8 @@ pub mod lockfree;
 // Firecracker VM integration
 pub mod firecracker;
 
-// CLI support (disabled due to missing dependencies)
-// pub mod cli;
+// CLI support 
+pub mod cli;
 
 // Simple API (disabled due to missing dependencies)
 // pub mod simple;
@@ -68,19 +74,12 @@ pub use auth::{JwtManager, Claims, ApiKeyManager, ApiKey, AuthMiddleware, User, 
 // Database exports
 pub use database::{SurrealConfig, SurrealPool, SurrealConnection, DatabaseBackend, DatabaseError, DatabaseResult};
 
-// Generated protobuf code (using mock implementation for now)
+// Generated protobuf code from tonic-build
 pub mod soulbox {
     pub mod v1 {
-        pub use crate::soulbox_v1::*;
+        tonic::include_proto!("soulbox.v1");
     }
 }
-
-// Include the mock implementation file as a module
-#[path = "soulbox.v1.rs"]
-mod soulbox_v1;
-
-// gRPC service traits
-pub mod soulbox_grpc;
 
 // gRPC exports
 pub use grpc::FILE_DESCRIPTOR_SET;

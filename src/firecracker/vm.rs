@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
-use tracing::{info, error, debug};
+use tracing::info;
 use uuid::Uuid;
 
 use crate::error::Result;
@@ -66,7 +66,7 @@ impl FirecrackerVM {
            .stdout(Stdio::piped())
            .stderr(Stdio::piped());
 
-        let mut child = cmd.spawn()
+        let child = cmd.spawn()
             .map_err(|e| crate::error::SoulBoxError::internal(
                 format!("Failed to start Firecracker: {}", e)
             ))?;

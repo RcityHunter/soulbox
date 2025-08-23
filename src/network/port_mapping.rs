@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tracing::{debug, error, info};
-use rand::seq::SliceRandom;
+// use rand::seq::SliceRandom; // Currently unused
 
 /// Port allocation and management errors
 #[derive(Error, Debug)]

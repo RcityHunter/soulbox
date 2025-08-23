@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
-use crate::error::{Result, SoulBoxError};
+use crate::error::Result;
 
 pub mod persistence;
 pub mod recovery;

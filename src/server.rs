@@ -5,7 +5,6 @@ use crate::api::templates::{template_routes, TemplateState};
 use crate::api::files::file_routes;
 use crate::audit::{AuditConfig, AuditMiddleware, AuditService};
 use crate::auth::middleware::{AuthMiddleware, AuthExtractor};
-use crate::auth::models::Permission;
 use crate::auth::{api_key::ApiKeyManager, JwtManager};
 use crate::config::Config;
 use crate::container::{ContainerManager, ResourceLimits, NetworkConfig};

@@ -17,7 +17,6 @@ use crate::auth::{
     models::{Permission, Role, User},
     JwtManager,
 };
-use crate::error::SoulBoxError;
 use crate::database::repositories::UserRepository;
 
 /// 登录请求

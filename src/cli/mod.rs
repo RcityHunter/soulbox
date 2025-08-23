@@ -9,7 +9,7 @@ pub mod config;
 use clap::{Parser, Subcommand};
 use colored::*;
 use std::process;
-use tracing::{error, info};
+use tracing::info;
 
 use crate::error::Result;
 pub use commands::*;
@@ -49,8 +49,14 @@ pub enum Commands {
     /// Create a new sandbox
     Create(commands::create::CreateArgs),
     
-    /// Execute code in a sandbox
+    /// Run code in a sandbox (simplified exec)
+    Run(commands::run::RunArgs),
+    
+    /// Execute code in a sandbox (advanced)
     Exec(commands::exec::ExecArgs),
+    
+    /// Stop running sandboxes
+    Stop(commands::stop::StopArgs),
     
     /// View sandbox logs
     Logs(commands::logs::LogsArgs),
@@ -89,7 +95,9 @@ impl Cli {
         match cli.command {
             Commands::Init(args) => commands::init::run(args, &config).await,
             Commands::Create(args) => commands::create::run(args, &config).await,
+            Commands::Run(args) => args.execute().await,
             Commands::Exec(args) => commands::exec::run(args, &config).await,
+            Commands::Stop(args) => args.execute().await,
             Commands::Logs(args) => commands::logs::run(args, &config).await,
             Commands::List(args) => commands::list::run(args, &config).await,
         }

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use crate::error::{Result, SoulBoxError};
 use bollard::container::Config;
-use super::{RuntimeConfig, RuntimeType, ExecutionContext, ExecutionFile};
+use super::{RuntimeConfig, RuntimeType, ExecutionContext};
 
 /// Python-specific runtime configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -305,7 +305,7 @@ impl PythonRuntime {
 
         // Check for basic Python syntax errors
         let lines: Vec<&str> = code.lines().collect();
-        let mut indent_stack = vec![0];
+        let indent_stack = vec![0];
         
         for (line_num, line) in lines.iter().enumerate() {
             let trimmed = line.trim();

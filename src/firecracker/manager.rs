@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::path::PathBuf;
 use tokio::sync::Mutex;
-use tracing::{info, error, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::error::Result;

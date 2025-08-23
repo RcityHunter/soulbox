@@ -11,12 +11,12 @@ pub struct FilePermissions {
     pub mode: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryListing {
     pub entries: Vec<FileMetadata>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMetadata {
     pub name: String,
     pub path: String,

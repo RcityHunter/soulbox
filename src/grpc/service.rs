@@ -1,8 +1,7 @@
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio_stream::{Stream, StreamExt};
+use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{info, warn, error};
 use uuid::Uuid;
@@ -10,19 +9,16 @@ use base64::Engine;
 
 use crate::container::{ResourceLimits as ContainerResourceLimits, NetworkConfig as ContainerNetworkConfig};
 use crate::container::resource_limits::{MemoryLimits, CpuLimits, DiskLimits, NetworkLimits};
-use crate::container::sandbox::SandboxContainer;
 use crate::container::manager::ContainerManager;
 use crate::config::Config;
-use crate::sandbox::{SandboxRuntime, SandboxInstance};
+// use crate::sandbox::SandboxInstance; // Currently unused
 
-// Import generated protobuf types
-// Note: The generated code will be in src/soulbox.v1.rs after build  
+// Import generated protobuf types and manual service traits
 pub use crate::soulbox::v1::*;
-// Import service traits from our manually defined module
-use crate::soulbox_grpc::soul_box_service_server;
-use crate::soulbox::v1::{execute_code_stream_response, download_file_response, upload_file_request};
-use crate::soulbox::v1::{ExecutionStarted, ExecutionOutput, ExecutionCompleted, OutputType};
-use crate::soulbox::v1::{FileDownloadMetadata, HealthStatus};
+use crate::grpc::service_traits::SoulBoxService;
+// No need to re-import types that are already included in the glob import above
+// These are already available: execute_code_stream_response, download_file_response, upload_file_request
+// ExecutionStarted, ExecutionOutput, ExecutionCompleted, OutputType, FileDownloadMetadata, HealthStatus
 
 // Real sandbox representation using container management
 #[derive(Debug, Clone)]
@@ -37,6 +33,7 @@ pub struct SandboxInfo {
     pub endpoint_url: String,
 }
 
+#[derive(Clone)]
 pub struct SoulBoxServiceImpl {
     container_manager: Arc<ContainerManager>,
     sandboxes: Arc<Mutex<HashMap<String, SandboxInfo>>>, // sandbox metadata
@@ -78,7 +75,7 @@ impl SoulBoxServiceImpl {
 }
 
 #[tonic::async_trait]
-impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
+impl SoulBoxService for SoulBoxServiceImpl {
     async fn create_sandbox(
         &self,
         request: Request<CreateSandboxRequest>,
@@ -321,7 +318,7 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
             Err(e) => {
                 error!("Failed to remove container for sandbox {}: {}", req.sandbox_id, e);
                 // Re-add to sandboxes since container removal failed
-                let mut sandboxes = self.sandboxes.lock().await;
+                let sandboxes = self.sandboxes.lock().await;
                 // We could restore the sandbox info here, but for simplicity we'll just return error
                 Err(Status::internal("Failed to remove sandbox container"))
             }
@@ -499,7 +496,7 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
     async fn stream_execute_code(
         &self,
         request: Request<ExecuteCodeRequest>,
-    ) -> Result<Response<<Self as soul_box_service_server::SoulBoxService>::StreamExecuteCodeStream>, Status> {
+    ) -> Result<Response<Self::StreamExecuteCodeStream>, Status> {
         let req = request.into_inner();
         
         // Validate request
@@ -626,7 +623,7 @@ impl soul_box_service_server::SoulBoxService for SoulBoxServiceImpl {
     async fn download_file(
         &self,
         request: Request<DownloadFileRequest>,
-    ) -> Result<Response<<Self as soul_box_service_server::SoulBoxService>::DownloadFileStream>, Status> {
+    ) -> Result<Response<Self::DownloadFileStream>, Status> {
         let req = request.into_inner();
         
         // Validate request

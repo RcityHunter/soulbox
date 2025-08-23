@@ -1,377 +1,385 @@
-//! Snapshot and checkpoint management system
-//! 
-//! This module provides comprehensive snapshot functionality for containers,
-//! including container state, filesystem, and memory preservation with fast
-//! restoration capabilities.
-
-pub mod checkpoint;
-pub mod storage;
-
-use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+// Snapshot system for container and filesystem state management
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tokio::sync::RwLock;
+use chrono::{DateTime, Utc};
+use serde::{Serialize, Deserialize};
 use uuid::Uuid;
+use tracing::info;
 
+use crate::error::{Result, SoulBoxError};
 use crate::container::manager::ContainerManager;
-use crate::filesystem::manager::FileSystemManager;
+use crate::filesystem::SandboxFileSystem;
 
-/// Represents different types of snapshots that can be created
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Snapshot types
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SnapshotType {
-    /// Full system snapshot including container state, filesystem, and memory
+    /// Full snapshot - captures entire state
     Full,
-    /// Container state only (configuration, environment, process state)
-    ContainerOnly,
-    /// Filesystem state only
-    FilesystemOnly,
-    /// Memory dump only
-    MemoryOnly,
-    /// Incremental snapshot based on previous snapshot
-    Incremental { base_snapshot_id: Uuid },
+    /// Incremental snapshot - captures only changes since last snapshot
+    Incremental { base_snapshot_id: String },
 }
 
-/// Metadata for a snapshot
+/// Container state snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SnapshotMetadata {
-    pub id: Uuid,
-    pub name: String,
-    pub description: Option<String>,
-    pub snapshot_type: SnapshotType,
+pub struct ContainerSnapshot {
     pub container_id: String,
-    pub created_at: DateTime<Utc>,
-    pub size_bytes: u64,
-    pub compression_ratio: Option<f32>,
-    pub tags: HashMap<String, String>,
-    pub checksum: String,
+    pub image: String,
+    pub environment: HashMap<String, String>,
+    pub resource_limits: ContainerResourceLimits,
+    pub network_config: ContainerNetworkConfig,
+    pub running_processes: Vec<ProcessInfo>,
+    pub memory_usage: u64,
+    pub cpu_usage: f64,
 }
 
-/// Current status of a snapshot operation
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum SnapshotStatus {
-    Creating,
-    Completed,
-    Failed(String),
-    Restoring,
-    Restored,
-    Deleted,
-}
-
-/// Configuration for snapshot creation
+/// Process information for container snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SnapshotConfig {
-    pub name: String,
-    pub description: Option<String>,
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub command: String,
+    pub cpu_usage: f64,
+    pub memory_usage: u64,
+    pub started_at: DateTime<Utc>,
+}
+
+/// Resource limits snapshot
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContainerResourceLimits {
+    pub memory_mb: u64,
+    pub cpu_cores: f64,
+    pub disk_mb: u64,
+}
+
+/// Network configuration snapshot
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContainerNetworkConfig {
+    pub enable_internet: bool,
+    pub port_mappings: Vec<PortMapping>,
+    pub allowed_domains: Vec<String>,
+}
+
+/// Port mapping configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortMapping {
+    pub host_port: u16,
+    pub container_port: u16,
+    pub protocol: String,
+}
+
+/// Complete snapshot of a sandbox session
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SandboxSnapshot {
+    pub id: String,
+    pub session_id: Uuid,
     pub snapshot_type: SnapshotType,
-    pub compress: bool,
-    pub include_memory: bool,
-    pub include_filesystem: bool,
-    pub tags: HashMap<String, String>,
+    pub created_at: DateTime<Utc>,
+    pub container_snapshot: Option<ContainerSnapshot>,
+    pub filesystem_snapshot_id: Option<String>,
+    pub metadata: HashMap<String, String>,
 }
 
-impl Default for SnapshotConfig {
-    fn default() -> Self {
-        Self {
-            name: format!("snapshot_{}", Uuid::new_v4()),
-            description: None,
-            snapshot_type: SnapshotType::Full,
-            compress: true,
-            include_memory: true,
-            include_filesystem: true,
-            tags: HashMap::new(),
-        }
-    }
-}
-
-/// Main snapshot manager responsible for coordinating snapshot operations
+/// Snapshot manager for creating and managing snapshots
 pub struct SnapshotManager {
-    storage: storage::SnapshotStorage,
-    checkpoint_manager: checkpoint::CheckpointManager,
-    active_operations: RwLock<HashMap<Uuid, SnapshotStatus>>,
-    container_manager: ContainerManager,
-    filesystem_manager: FileSystemManager,
+    storage_path: PathBuf,
+    container_manager: Box<ContainerManager>,
+    snapshots: HashMap<String, SandboxSnapshot>,
 }
 
 impl SnapshotManager {
-    /// Create a new snapshot manager
-    pub fn new(
-        storage_path: PathBuf,
-        container_manager: ContainerManager,
-        filesystem_manager: FileSystemManager,
-    ) -> Result<Self> {
-        let storage = storage::SnapshotStorage::new(storage_path)
-            .context("Failed to initialize snapshot storage")?;
+    pub fn new(storage_path: PathBuf, container_manager: Box<ContainerManager>) -> Self {
+        std::fs::create_dir_all(&storage_path).ok();
         
-        let checkpoint_manager = checkpoint::CheckpointManager::new()?;
-
-        Ok(Self {
-            storage,
-            checkpoint_manager,
-            active_operations: RwLock::new(HashMap::new()),
+        Self {
+            storage_path,
             container_manager,
-            filesystem_manager,
+            snapshots: HashMap::new(),
+        }
+    }
+
+    /// Create a full snapshot of a sandbox
+    pub async fn create_full_snapshot(
+        &mut self,
+        session_id: Uuid,
+        sandbox_fs: &mut SandboxFileSystem,
+    ) -> Result<String> {
+        info!("Creating full snapshot for session {}", session_id);
+        
+        let snapshot_id = format!("snap_{}_{}", session_id, Utc::now().timestamp());
+        
+        // Create filesystem snapshot
+        let fs_snapshot_id = sandbox_fs.create_snapshot(&snapshot_id).await?;
+        
+        // Get container state
+        let container_snapshot = self.capture_container_state(&session_id.to_string()).await?;
+        
+        let snapshot = SandboxSnapshot {
+            id: snapshot_id.clone(),
+            session_id,
+            snapshot_type: SnapshotType::Full,
+            created_at: Utc::now(),
+            container_snapshot: Some(container_snapshot),
+            filesystem_snapshot_id: Some(fs_snapshot_id),
+            metadata: HashMap::new(),
+        };
+        
+        // Save snapshot metadata
+        self.save_snapshot(&snapshot).await?;
+        self.snapshots.insert(snapshot_id.clone(), snapshot);
+        
+        info!("Full snapshot {} created successfully", snapshot_id);
+        Ok(snapshot_id)
+    }
+
+    /// Create an incremental snapshot
+    pub async fn create_incremental_snapshot(
+        &mut self,
+        session_id: Uuid,
+        base_snapshot_id: &str,
+        sandbox_fs: &mut SandboxFileSystem,
+    ) -> Result<String> {
+        info!("Creating incremental snapshot for session {} based on {}", session_id, base_snapshot_id);
+        
+        // Verify base snapshot exists
+        if !self.snapshots.contains_key(base_snapshot_id) {
+            return Err(SoulBoxError::not_found(format!("Base snapshot not found: {}", base_snapshot_id)));
+        }
+        
+        let snapshot_id = format!("snap_incr_{}_{}", session_id, Utc::now().timestamp());
+        
+        // Create incremental filesystem snapshot
+        let fs_snapshot_id = sandbox_fs.create_snapshot(&snapshot_id).await?;
+        
+        // Capture only changed container state
+        let container_snapshot = self.capture_container_state(&session_id.to_string()).await?;
+        
+        let snapshot = SandboxSnapshot {
+            id: snapshot_id.clone(),
+            session_id,
+            snapshot_type: SnapshotType::Incremental { 
+                base_snapshot_id: base_snapshot_id.to_string() 
+            },
+            created_at: Utc::now(),
+            container_snapshot: Some(container_snapshot),
+            filesystem_snapshot_id: Some(fs_snapshot_id),
+            metadata: HashMap::new(),
+        };
+        
+        // Save snapshot metadata
+        self.save_snapshot(&snapshot).await?;
+        self.snapshots.insert(snapshot_id.clone(), snapshot);
+        
+        info!("Incremental snapshot {} created successfully", snapshot_id);
+        Ok(snapshot_id)
+    }
+
+    /// Restore from a snapshot
+    pub fn restore_snapshot<'a>(
+        &'a self,
+        snapshot_id: &'a str,
+        sandbox_fs: &'a SandboxFileSystem,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move {
+            info!("Restoring from snapshot {}", snapshot_id);
+            
+            let snapshot = self.snapshots.get(snapshot_id)
+                .ok_or_else(|| SoulBoxError::not_found(format!("Snapshot not found: {}", snapshot_id)))?;
+            
+            // Handle incremental snapshots by applying them in order
+            match &snapshot.snapshot_type {
+                SnapshotType::Full => {
+                    self.restore_full_snapshot(snapshot, sandbox_fs).await?;
+                }
+                SnapshotType::Incremental { base_snapshot_id } => {
+                    // First restore the base snapshot
+                    self.restore_snapshot(base_snapshot_id, sandbox_fs).await?;
+                    // Then apply incremental changes
+                    self.apply_incremental_snapshot(snapshot, sandbox_fs).await?;
+                }
+            }
+            
+            info!("Successfully restored from snapshot {}", snapshot_id);
+            Ok(())
         })
     }
 
-    /// Create a new snapshot of the specified container
-    pub async fn create_snapshot(
+    /// Restore a full snapshot
+    async fn restore_full_snapshot(
         &self,
-        container_id: &str,
-        config: SnapshotConfig,
-    ) -> Result<Uuid> {
-        let snapshot_id = Uuid::new_v4();
-        
-        // Mark operation as in progress
-        {
-            let mut operations = self.active_operations.write().await;
-            operations.insert(snapshot_id, SnapshotStatus::Creating);
-        }
-
-        // Execute snapshot creation
-        let result = self.execute_snapshot_creation(snapshot_id, container_id, config).await;
-
-        // Update operation status
-        {
-            let mut operations = self.active_operations.write().await;
-            match &result {
-                Ok(_) => {
-                    operations.insert(snapshot_id, SnapshotStatus::Completed);
-                },
-                Err(e) => {
-                    operations.insert(snapshot_id, SnapshotStatus::Failed(e.to_string()));
-                }
-            }
-        }
-
-        result.map(|_| snapshot_id)
-    }
-
-    /// Execute the actual snapshot creation process
-    async fn execute_snapshot_creation(
-        &self,
-        snapshot_id: Uuid,
-        container_id: &str,
-        config: SnapshotConfig,
+        snapshot: &SandboxSnapshot,
+        sandbox_fs: &SandboxFileSystem,
     ) -> Result<()> {
-        tracing::info!(
-            snapshot_id = %snapshot_id,
-            container_id = container_id,
-            snapshot_type = ?config.snapshot_type,
-            "Creating snapshot"
-        );
-
-        // Create checkpoint based on snapshot type
-        let checkpoint_data = match config.snapshot_type {
-            SnapshotType::Full => {
-                self.checkpoint_manager.create_full_checkpoint(
-                    container_id,
-                    config.include_memory,
-                    config.include_filesystem,
-                ).await?
-            },
-            SnapshotType::ContainerOnly => {
-                self.checkpoint_manager.create_container_checkpoint(container_id).await?
-            },
-            SnapshotType::FilesystemOnly => {
-                self.checkpoint_manager.create_filesystem_checkpoint(container_id).await?
-            },
-            SnapshotType::MemoryOnly => {
-                self.checkpoint_manager.create_memory_checkpoint(container_id).await?
-            },
-            SnapshotType::Incremental { base_snapshot_id } => {
-                self.checkpoint_manager.create_incremental_checkpoint(
-                    container_id,
-                    base_snapshot_id,
-                ).await?
-            },
-        };
-
-        // Create metadata
-        let metadata = SnapshotMetadata {
-            id: snapshot_id,
-            name: config.name,
-            description: config.description,
-            snapshot_type: config.snapshot_type,
-            container_id: container_id.to_string(),
-            created_at: Utc::now(),
-            size_bytes: checkpoint_data.len() as u64,
-            compression_ratio: if config.compress { Some(0.7) } else { None },
-            tags: config.tags,
-            checksum: self.calculate_checksum(&checkpoint_data),
-        };
-
-        let size_bytes = metadata.size_bytes;
+        // Restore filesystem
+        if let Some(fs_snapshot_id) = &snapshot.filesystem_snapshot_id {
+            sandbox_fs.restore_from_snapshot(fs_snapshot_id).await?;
+        }
         
-        // Store snapshot
-        self.storage.store_snapshot(metadata, checkpoint_data, config.compress).await
-            .context("Failed to store snapshot")?;
-
-        tracing::info!(
-            snapshot_id = %snapshot_id,
-            size_bytes = size_bytes,
-            "Snapshot created successfully"
-        );
-
+        // Restore container state
+        if let Some(container_snapshot) = &snapshot.container_snapshot {
+            self.restore_container_state(&snapshot.session_id.to_string(), container_snapshot).await?;
+        }
+        
         Ok(())
     }
 
-    /// Restore a container from a snapshot
-    pub async fn restore_snapshot(
+    /// Apply incremental snapshot changes
+    async fn apply_incremental_snapshot(
         &self,
-        snapshot_id: Uuid,
-        target_container_id: Option<String>,
-    ) -> Result<String> {
-        // Mark operation as in progress
-        {
-            let mut operations = self.active_operations.write().await;
-            operations.insert(snapshot_id, SnapshotStatus::Restoring);
+        snapshot: &SandboxSnapshot,
+        sandbox_fs: &SandboxFileSystem,
+    ) -> Result<()> {
+        // Apply filesystem changes
+        if let Some(fs_snapshot_id) = &snapshot.filesystem_snapshot_id {
+            // In a real implementation, this would apply only the delta
+            sandbox_fs.restore_from_snapshot(fs_snapshot_id).await?;
         }
-
-        let result = self.execute_snapshot_restoration(snapshot_id, target_container_id).await;
-
-        // Update operation status
-        {
-            let mut operations = self.active_operations.write().await;
-            match &result {
-                Ok(_) => {
-                    operations.insert(snapshot_id, SnapshotStatus::Restored);
-                },
-                Err(e) => {
-                    operations.insert(snapshot_id, SnapshotStatus::Failed(e.to_string()));
-                }
-            }
+        
+        // Apply container state changes
+        if let Some(container_snapshot) = &snapshot.container_snapshot {
+            self.restore_container_state(&snapshot.session_id.to_string(), container_snapshot).await?;
         }
-
-        result
+        
+        Ok(())
     }
 
-    /// Execute the actual snapshot restoration process
-    async fn execute_snapshot_restoration(
+    /// Capture current container state
+    async fn capture_container_state(&self, container_id: &str) -> Result<ContainerSnapshot> {
+        let container = self.container_manager.get_container(container_id).await
+            .ok_or_else(|| SoulBoxError::not_found(format!("Container not found: {}", container_id)))?;
+        
+        // Get container stats - simplified for MVP
+        let cpu_usage = 10.0; // Placeholder
+        let memory_usage = 100; // Placeholder
+        
+        // Get running processes - simplified for MVP
+        let processes = vec![]; // Would get actual processes in production
+        
+        Ok(ContainerSnapshot {
+            container_id: container_id.to_string(),
+            image: "python:3.11-slim".to_string(), // Would get from container info
+            environment: HashMap::new(), // Would get from container config
+            resource_limits: ContainerResourceLimits {
+                memory_mb: 512, // Get from actual container config
+                cpu_cores: 1.0,
+                disk_mb: 2048,
+            },
+            network_config: ContainerNetworkConfig {
+                enable_internet: true,
+                port_mappings: vec![],
+                allowed_domains: vec![],
+            },
+            running_processes: processes,
+            memory_usage,
+            cpu_usage,
+        })
+    }
+
+    /// Restore container to a specific state
+    async fn restore_container_state(
         &self,
-        snapshot_id: Uuid,
-        target_container_id: Option<String>,
-    ) -> Result<String> {
-        tracing::info!(
-            snapshot_id = %snapshot_id,
-            target_container_id = ?target_container_id,
-            "Restoring snapshot"
-        );
-
-        // Load snapshot data
-        let (metadata, checkpoint_data) = self.storage.load_snapshot(snapshot_id).await
-            .context("Failed to load snapshot")?;
-
-        // Verify checksum
-        let calculated_checksum = self.calculate_checksum(&checkpoint_data);
-        if calculated_checksum != metadata.checksum {
-            return Err(anyhow::anyhow!("Snapshot checksum verification failed"));
+        container_id: &str,
+        snapshot: &ContainerSnapshot,
+    ) -> Result<()> {
+        // Stop existing container if running
+        if let Some(container) = self.container_manager.get_container(container_id).await {
+            container.stop().await?;
         }
-
-        // Determine target container ID
-        let container_id = target_container_id.unwrap_or_else(|| {
-            format!("{}_restored_{}", metadata.container_id, Uuid::new_v4())
-        });
-
-        // Restore from checkpoint
-        self.checkpoint_manager.restore_from_checkpoint(
-            &container_id,
-            checkpoint_data,
-            metadata.snapshot_type,
-        ).await.context("Failed to restore from checkpoint")?;
-
-        tracing::info!(
-            snapshot_id = %snapshot_id,
-            container_id = container_id,
-            "Snapshot restored successfully"
-        );
-
-        Ok(container_id)
+        
+        // Recreate container with snapshot configuration
+        let resource_limits = crate::container::ResourceLimits {
+            memory: crate::container::resource_limits::MemoryLimits {
+                limit_mb: snapshot.resource_limits.memory_mb,
+                swap_limit_mb: Some(snapshot.resource_limits.memory_mb * 2),
+                swap_mb: Some(snapshot.resource_limits.memory_mb / 2),
+            },
+            cpu: crate::container::resource_limits::CpuLimits {
+                cores: snapshot.resource_limits.cpu_cores,
+                shares: Some(1024),
+                cpu_percent: Some(80.0),
+            },
+            disk: crate::container::resource_limits::DiskLimits {
+                limit_mb: snapshot.resource_limits.disk_mb,
+                iops_limit: Some(1000),
+            },
+            network: crate::container::resource_limits::NetworkLimits {
+                upload_bps: Some(1024 * 1024 * 10),
+                download_bps: Some(1024 * 1024 * 100),
+                max_connections: Some(100),
+            },
+        };
+        
+        let network_config = crate::container::NetworkConfig {
+            enable_internet: snapshot.network_config.enable_internet,
+            port_mappings: vec![],
+            allowed_domains: snapshot.network_config.allowed_domains.clone(),
+            dns_servers: vec!["8.8.8.8".to_string(), "1.1.1.1".to_string()],
+        };
+        
+        // Create new container with snapshot state
+        let container = self.container_manager.create_sandbox_container(
+            container_id,
+            &snapshot.image,
+            resource_limits,
+            network_config,
+            snapshot.environment.clone(),
+        ).await?;
+        
+        // Start the container
+        container.start().await?;
+        
+        Ok(())
     }
 
-    /// List all available snapshots
-    pub async fn list_snapshots(&self) -> Result<Vec<SnapshotMetadata>> {
-        self.storage.list_snapshots().await
+    /// Save snapshot metadata to disk
+    async fn save_snapshot(&self, snapshot: &SandboxSnapshot) -> Result<()> {
+        let snapshot_file = self.storage_path.join(format!("{}.json", snapshot.id));
+        let json = serde_json::to_string_pretty(snapshot)?;
+        tokio::fs::write(snapshot_file, json).await?;
+        Ok(())
     }
 
-    /// Get metadata for a specific snapshot
-    pub async fn get_snapshot_metadata(&self, snapshot_id: Uuid) -> Result<SnapshotMetadata> {
-        self.storage.get_snapshot_metadata(snapshot_id).await
+    /// Load snapshot metadata from disk
+    pub async fn load_snapshot(&mut self, snapshot_id: &str) -> Result<SandboxSnapshot> {
+        if let Some(snapshot) = self.snapshots.get(snapshot_id) {
+            return Ok(snapshot.clone());
+        }
+        
+        let snapshot_file = self.storage_path.join(format!("{}.json", snapshot_id));
+        let json = tokio::fs::read_to_string(snapshot_file).await?;
+        let snapshot: SandboxSnapshot = serde_json::from_str(&json)?;
+        
+        self.snapshots.insert(snapshot_id.to_string(), snapshot.clone());
+        Ok(snapshot)
+    }
+
+    /// List all available snapshots for a session
+    pub async fn list_snapshots(&self, session_id: Option<Uuid>) -> Vec<SandboxSnapshot> {
+        self.snapshots.values()
+            .filter(|s| session_id.is_none() || Some(s.session_id) == session_id)
+            .cloned()
+            .collect()
     }
 
     /// Delete a snapshot
-    pub async fn delete_snapshot(&self, snapshot_id: Uuid) -> Result<()> {
-        self.storage.delete_snapshot(snapshot_id).await
-            .context("Failed to delete snapshot")?;
-
-        // Update operation status
-        {
-            let mut operations = self.active_operations.write().await;
-            operations.insert(snapshot_id, SnapshotStatus::Deleted);
-        }
-
-        tracing::info!(snapshot_id = %snapshot_id, "Snapshot deleted");
+    pub async fn delete_snapshot(&mut self, snapshot_id: &str) -> Result<()> {
+        self.snapshots.remove(snapshot_id);
+        let snapshot_file = self.storage_path.join(format!("{}.json", snapshot_id));
+        tokio::fs::remove_file(snapshot_file).await.ok();
         Ok(())
     }
 
-    /// Get the status of an ongoing operation
-    pub async fn get_operation_status(&self, snapshot_id: Uuid) -> Option<SnapshotStatus> {
-        let operations = self.active_operations.read().await;
-        operations.get(&snapshot_id).cloned()
-    }
-
-    /// Calculate checksum for data integrity verification
-    fn calculate_checksum(&self, data: &[u8]) -> String {
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(data);
-        format!("{:x}", hasher.finalize())
-    }
-
     /// Clean up old snapshots based on retention policy
-    pub async fn cleanup_old_snapshots(&self, max_age_days: u32, max_count: usize) -> Result<usize> {
-        self.storage.cleanup_old_snapshots(max_age_days, max_count).await
-    }
-
-    /// Get storage statistics
-    pub async fn get_storage_stats(&self) -> Result<storage::StorageStats> {
-        self.storage.get_storage_stats().await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    #[tokio::test]
-    async fn test_snapshot_config_default() {
-        let config = SnapshotConfig::default();
-        assert!(config.name.starts_with("snapshot_"));
-        assert_eq!(config.snapshot_type, SnapshotType::Full);
-        assert!(config.compress);
-        assert!(config.include_memory);
-        assert!(config.include_filesystem);
-    }
-
-    #[tokio::test]
-    async fn test_snapshot_metadata_creation() {
-        let metadata = SnapshotMetadata {
-            id: Uuid::new_v4(),
-            name: "test_snapshot".to_string(),
-            description: Some("Test description".to_string()),
-            snapshot_type: SnapshotType::Full,
-            container_id: "test_container".to_string(),
-            created_at: Utc::now(),
-            size_bytes: 1024,
-            compression_ratio: Some(0.7),
-            tags: HashMap::new(),
-            checksum: "abc123".to_string(),
-        };
-
-        assert_eq!(metadata.name, "test_snapshot");
-        assert_eq!(metadata.container_id, "test_container");
-        assert_eq!(metadata.size_bytes, 1024);
+    pub async fn cleanup_old_snapshots(&mut self, retention_days: i64) -> Result<()> {
+        let cutoff_time = Utc::now() - chrono::Duration::days(retention_days);
+        
+        let old_snapshots: Vec<String> = self.snapshots.iter()
+            .filter(|(_, s)| s.created_at < cutoff_time)
+            .map(|(id, _)| id.clone())
+            .collect();
+        
+        for snapshot_id in old_snapshots {
+            self.delete_snapshot(&snapshot_id).await?;
+        }
+        
+        Ok(())
     }
 }

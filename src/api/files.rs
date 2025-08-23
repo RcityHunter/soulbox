@@ -4,19 +4,16 @@ use axum::{
     response::Json,
     routing::{delete, get, post, put},
     Router,
-    body::Bytes,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use base64::Engine;
-use std::{sync::Arc, collections::HashMap};
 use uuid::Uuid;
 use tracing::error;
 
 use crate::auth::middleware::AuthExtractor;
-use crate::auth::models::Permission;
-use crate::error::{Result as SoulBoxResult, SoulBoxError};
-use crate::filesystem::{SandboxFileSystem, FilePermissions, DirectoryListing, FileMetadata, DiskUsage};
+use crate::error::SoulBoxError;
+use crate::filesystem::{FilePermissions, DirectoryListing, FileMetadata, DiskUsage};
 use crate::server::AppState;
 
 /// File upload request
@@ -54,6 +51,18 @@ impl FileUploadRequest {
 #[derive(Debug, Deserialize)]
 pub struct FileQueryParams {
     pub encoding: Option<String>, // "base64" or "text", defaults to "base64"
+}
+
+/// Request for listing directories
+#[derive(Debug, Deserialize)]
+pub struct ListDirectoryRequest {
+    pub path: String,
+}
+
+/// Request for getting file metadata
+#[derive(Debug, Deserialize)]
+pub struct GetFileMetadataRequest {
+    pub path: String,
 }
 
 /// Directory listing query parameters
@@ -254,13 +263,18 @@ pub async fn delete_file(
     Ok(Json(response))
 }
 
-/// List directory contents handler wrapper
-pub async fn list_directory_handler(
+/// List directory contents wrapper for POST request
+pub async fn list_directory_wrapper(
     State(state): State<AppState>,
-    Path((sandbox_id, dir_path)): Path<(String, String)>,
-) -> Result<Json<DirectoryListing>, (StatusCode, Json<Value>)> {
-    list_directory(state, sandbox_id, dir_path).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))))
+    Path(sandbox_id): Path<String>,
+    _auth: AuthExtractor,
+    Json(request): Json<ListDirectoryRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let result = list_directory(state, sandbox_id, request.path).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))))?;
+    
+    // Convert DirectoryListing to Value
+    Ok(Json(serde_json::to_value(result.0).unwrap()))
 }
 
 /// List directory contents
@@ -343,10 +357,24 @@ pub async fn create_directory(
     Ok(Json(response))
 }
 
+/// Get file metadata wrapper for POST request
+pub async fn get_file_metadata_wrapper(
+    State(state): State<AppState>,
+    Path(sandbox_id): Path<String>,
+    _auth: AuthExtractor,
+    Json(request): Json<GetFileMetadataRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let result = get_file_metadata(state, sandbox_id, request.path).await?;
+    
+    // Convert FileMetadata to Value
+    Ok(Json(serde_json::to_value(result.0).unwrap()))
+}
+
 /// Get file metadata
 pub async fn get_file_metadata(
-    State(state): State<AppState>,
-    Path((sandbox_id, file_path)): Path<(String, String)>,
+    state: AppState,
+    sandbox_id: String,
+    file_path: String,
 ) -> Result<Json<FileMetadata>, (StatusCode, Json<Value>)> {
     // Validate sandbox_id is a valid UUID
     let _sandbox_uuid = Uuid::parse_str(&sandbox_id)
@@ -534,10 +562,10 @@ pub fn file_routes() -> Router<AppState> {
         
         // Directory operations
         .route("/sandboxes/{sandbox_id}/directories", post(create_directory))
-        .route("/sandboxes/:sandbox_id/directories", get(list_directory_handler))
+        .route("/sandboxes/{sandbox_id}/directories/list", post(list_directory_wrapper))
         
         // Metadata and permissions
-        .route("/sandboxes/:sandbox_id/metadata", get(get_file_metadata))
+        .route("/sandboxes/{sandbox_id}/metadata", post(get_file_metadata_wrapper))
         .route("/sandboxes/{sandbox_id}/permissions/{*file_path}", put(set_permissions))
         
         // Advanced operations

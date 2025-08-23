@@ -1,6 +1,6 @@
 use crate::container::{ContainerManager, CodeExecutor, CodeExecutionResult, ResourceLimits, NetworkConfig};
 use crate::error::{Result, SoulBoxError};
-use crate::template::{Template, DockerfileParser, DockerImageBuilder};
+use crate::template::Template;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

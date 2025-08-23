@@ -239,8 +239,8 @@ impl SandboxContainer {
                     .usage
                     .unwrap_or(0) / (1024 * 1024); // Convert to MB
                 
-                let cpu_usage = if let (cpu_stats, precpu_stats) = 
-                    (&stats.cpu_stats, &stats.precpu_stats) {
+                let cpu_usage = {
+                    let (cpu_stats, precpu_stats) = (&stats.cpu_stats, &stats.precpu_stats);
                     if let (Some(system_usage), Some(presystem_usage)) = 
                         (cpu_stats.system_cpu_usage, precpu_stats.system_cpu_usage) {
                         
@@ -258,8 +258,6 @@ impl SandboxContainer {
                     } else {
                         0.0
                     }
-                } else {
-                    0.0
                 };
                 
                 let network_rx = stats.networks
@@ -293,6 +291,37 @@ impl SandboxContainer {
                     network_rx_bytes: 1024,
                     network_tx_bytes: 512,
                 })
+            }
+        }
+    }
+
+    /// Check if the container is healthy and running
+    pub async fn health_check(&self) -> Result<bool> {
+        match self.docker.inspect_container(&self.container_id, None::<bollard::container::InspectContainerOptions>).await {
+            Ok(details) => {
+                // Check if container is running
+                if let Some(state) = details.state {
+                    if let Some(running) = state.running {
+                        if running {
+                            // Container is running, do a simple connectivity test
+                            let test_result = self.execute_command(vec!["echo".to_string(), "health_check".to_string()]).await;
+                            match test_result {
+                                Ok(result) => Ok(result.exit_code == 0),
+                                Err(_) => Ok(false), // Command failed, container unhealthy
+                            }
+                        } else {
+                            Ok(false) // Container not running
+                        }
+                    } else {
+                        Ok(false) // No running state info
+                    }
+                } else {
+                    Ok(false) // No state info
+                }
+            }
+            Err(e) => {
+                warn!("Health check failed for container {}: {}", self.container_id, e);
+                Ok(false)
             }
         }
     }
@@ -347,11 +376,22 @@ impl SandboxContainer {
             // First, cancel all background tasks
             self.task_tracker.cancel_all().await;
             
+            // Stop container gracefully first if it's running
+            if let Ok(status) = self.get_status().await {
+                if status == "running" {
+                    info!("Gracefully stopping container {} before cleanup", self.container_id);
+                    if let Err(e) = self.stop().await {
+                        warn!("Failed to stop container {} gracefully: {}", self.container_id, e);
+                    }
+                }
+            }
+            
             // Then cleanup the container with timeout
             let cleanup_result = tokio::time::timeout(
                 Duration::from_secs(30),
                 self.docker.remove_container(&self.container_id, Some(RemoveContainerOptions {
                     force: true,
+                    v: true, // Remove associated volumes
                     ..Default::default()
                 }))
             ).await;
@@ -372,6 +412,67 @@ impl SandboxContainer {
         Ok(())
     }
 
+    /// Pause the container
+    pub async fn pause(&self) -> Result<()> {
+        info!("Pausing container: {}", self.container_id);
+        
+        self.docker
+            .pause_container(&self.container_id)
+            .await
+            .map_err(|e| SoulBoxError::internal(format!("Failed to pause container: {}", e)))?;
+            
+        info!("Container paused successfully: {}", self.container_id);
+        Ok(())
+    }
+
+    /// Resume the container from paused state
+    pub async fn resume(&self) -> Result<()> {
+        info!("Resuming container: {}", self.container_id);
+        
+        self.docker
+            .unpause_container(&self.container_id)
+            .await
+            .map_err(|e| SoulBoxError::internal(format!("Failed to resume container: {}", e)))?;
+            
+        info!("Container resumed successfully: {}", self.container_id);
+        Ok(())
+    }
+
+    /// Restart the container
+    pub async fn restart(&self) -> Result<()> {
+        info!("Restarting container: {}", self.container_id);
+        
+        let restart_options = bollard::container::RestartContainerOptions {
+            t: 10, // 10 second grace period
+        };
+        
+        self.docker
+            .restart_container(&self.container_id, Some(restart_options))
+            .await
+            .map_err(|e| SoulBoxError::internal(format!("Failed to restart container: {}", e)))?;
+            
+        info!("Container restarted successfully: {}", self.container_id);
+        Ok(())
+    }
+
+    /// Kill the container forcefully
+    pub async fn kill(&self, signal: Option<&str>) -> Result<()> {
+        let kill_signal = signal.unwrap_or("SIGTERM");
+        info!("Killing container {} with signal {}", self.container_id, kill_signal);
+        
+        let kill_options = bollard::container::KillContainerOptions {
+            signal: kill_signal,
+        };
+        
+        self.docker
+            .kill_container(&self.container_id, Some(kill_options))
+            .await
+            .map_err(|e| SoulBoxError::internal(format!("Failed to kill container: {}", e)))?;
+            
+        info!("Container killed successfully: {}", self.container_id);
+        Ok(())
+    }
+
     /// Check if container has been cleaned up
     pub fn is_cleaned_up(&self) -> bool {
         self.cleaned_up.load(Ordering::Relaxed)
@@ -380,6 +481,144 @@ impl SandboxContainer {
     /// Get task tracker statistics
     pub async fn get_task_stats(&self) -> TaskStats {
         self.task_tracker.get_stats().await
+    }
+
+    /// Get container logs with options
+    pub async fn get_logs(&self, options: ContainerLogOptions) -> Result<ContainerLogs> {
+        use bollard::container::LogsOptions;
+        use futures_util::StreamExt;
+        
+        let logs_options = LogsOptions::<String> {
+            stdout: options.stdout,
+            stderr: options.stderr,
+            tail: options.tail.map(|n| n.to_string()).unwrap_or_default(),
+            since: options.since.map(|ts| ts.timestamp()).unwrap_or_default(),
+            until: options.until.map(|ts| ts.timestamp()).unwrap_or_default(),
+            timestamps: options.timestamps,
+            follow: false, // Don't follow for safety
+            ..Default::default()
+        };
+        
+        let mut log_stream = self.docker.logs(&self.container_id, Some(logs_options));
+        let mut stdout_logs = Vec::new();
+        let mut stderr_logs = Vec::new();
+        
+        while let Some(log_result) = log_stream.next().await {
+            match log_result {
+                Ok(bollard::container::LogOutput::StdOut { message }) => {
+                    stdout_logs.push(String::from_utf8_lossy(&message).to_string());
+                }
+                Ok(bollard::container::LogOutput::StdErr { message }) => {
+                    stderr_logs.push(String::from_utf8_lossy(&message).to_string());
+                }
+                Ok(_) => {} // Ignore other log types
+                Err(e) => {
+                    error!("Error reading container logs: {}", e);
+                    break;
+                }
+            }
+        }
+        
+        Ok(ContainerLogs {
+            stdout: stdout_logs,
+            stderr: stderr_logs,
+            container_id: self.container_id.clone(),
+        })
+    }
+
+    /// Copy files to container
+    pub async fn copy_to_container(&self, src_path: &str, dest_path: &str) -> Result<()> {
+        use bollard::container::UploadToContainerOptions;
+        use std::path::Path;
+        use tokio::fs;
+        
+        // Security check: ensure destination is within allowed paths
+        if dest_path.starts_with("/proc") || dest_path.starts_with("/sys") || dest_path.starts_with("/dev") {
+            return Err(SoulBoxError::internal("Destination path not allowed for security reasons".to_string()));
+        }
+        
+        // Read source file
+        let file_content = fs::read(src_path).await
+            .map_err(|e| SoulBoxError::internal(format!("Failed to read source file: {}", e)))?;
+            
+        // Create a simple tar archive in memory
+        let mut tar_data = Vec::new();
+        {
+            let mut tar = tar::Builder::new(&mut tar_data);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(file_content.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            
+            let filename = Path::new(dest_path).file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| SoulBoxError::internal("Invalid destination filename".to_string()))?;
+                
+            tar.append_data(&mut header, filename, std::io::Cursor::new(file_content))
+                .map_err(|e| SoulBoxError::internal(format!("Failed to create tar archive: {}", e)))?;
+            tar.finish()
+                .map_err(|e| SoulBoxError::internal(format!("Failed to finalize tar archive: {}", e)))?;
+        }
+        
+        let upload_options = UploadToContainerOptions {
+            path: Path::new(dest_path).parent()
+                .and_then(|p| p.to_str())
+                .unwrap_or("/workspace")
+                .to_string(),
+            ..Default::default()
+        };
+        
+        self.docker.upload_to_container(&self.container_id, Some(upload_options), bytes::Bytes::from(tar_data))
+            .await
+            .map_err(|e| SoulBoxError::internal(format!("Failed to upload to container: {}", e)))?;
+            
+        info!("File copied successfully from {} to container {}", src_path, dest_path);
+        Ok(())
+    }
+
+    /// Copy files from container
+    pub async fn copy_from_container(&self, src_path: &str, dest_path: &str) -> Result<()> {
+        use bollard::container::DownloadFromContainerOptions;
+        use futures_util::StreamExt;
+        use tokio::fs;
+        
+        // Security check: ensure source is within allowed paths
+        if src_path.starts_with("/proc") || src_path.starts_with("/sys") || src_path.starts_with("/dev") {
+            return Err(SoulBoxError::internal("Source path not allowed for security reasons".to_string()));
+        }
+        
+        let download_options = DownloadFromContainerOptions {
+            path: src_path.to_string(),
+        };
+        
+        let mut download_stream = self.docker.download_from_container(&self.container_id, Some(download_options));
+        let mut tar_data = Vec::new();
+        
+        while let Some(chunk) = download_stream.next().await {
+            let chunk = chunk.map_err(|e| SoulBoxError::internal(format!("Failed to download from container: {}", e)))?;
+            tar_data.extend_from_slice(&chunk);
+        }
+        
+        // Extract from tar archive
+        let mut archive = tar::Archive::new(std::io::Cursor::new(tar_data));
+        let mut entries = archive.entries()
+            .map_err(|e| SoulBoxError::internal(format!("Failed to read tar entries: {}", e)))?;
+            
+        if let Some(entry) = entries.next() {
+            let mut entry = entry.map_err(|e| SoulBoxError::internal(format!("Failed to read tar entry: {}", e)))?;
+            let mut content = Vec::new();
+            std::io::Read::read_to_end(&mut entry, &mut content)
+                .map_err(|e| SoulBoxError::internal(format!("Failed to read entry content: {}", e)))?;
+                
+            fs::write(dest_path, content).await
+                .map_err(|e| SoulBoxError::internal(format!("Failed to write destination file: {}", e)))?;
+                
+            info!("File copied successfully from container {} to {}", src_path, dest_path);
+        } else {
+            return Err(SoulBoxError::internal("No files found in container archive".to_string()));
+        }
+        
+        Ok(())
     }
     
     /// Validate command for security issues
@@ -522,7 +761,7 @@ impl SandboxContainer {
         use std::path::Path;
         
         // 创建安全的路径处理
-        let path_obj = Path::new(path);
+        let _path_obj = Path::new(path);
         
         // 检查路径长度
         if path.len() > 4096 {
@@ -604,9 +843,10 @@ impl SandboxContainer {
 impl Drop for SandboxContainer {
     fn drop(&mut self) {
         if self.cleaned_up.compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed).is_ok() {
-            let container_id = self.container_id.clone();
-            let docker = self.docker.clone();
-            let task_tracker = self.task_tracker.clone();
+            // These variables are kept for potential future use in cleanup
+            let _container_id = self.container_id.clone();
+            let _docker = self.docker.clone();
+            let _task_tracker = self.task_tracker.clone();
             
             // SECURITY FIX: Removed async task spawning to prevent race conditions
             // Use synchronous cleanup to ensure resources are properly freed
@@ -681,6 +921,36 @@ pub struct ResourceStats {
     pub cpu_cores: f64,
     pub network_rx_bytes: u64,
     pub network_tx_bytes: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContainerLogOptions {
+    pub stdout: bool,
+    pub stderr: bool,
+    pub tail: Option<usize>,
+    pub since: Option<chrono::DateTime<chrono::Utc>>,
+    pub until: Option<chrono::DateTime<chrono::Utc>>,
+    pub timestamps: bool,
+}
+
+impl Default for ContainerLogOptions {
+    fn default() -> Self {
+        Self {
+            stdout: true,
+            stderr: true,
+            tail: None,
+            since: None,
+            until: None,
+            timestamps: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ContainerLogs {
+    pub stdout: Vec<String>,
+    pub stderr: Vec<String>,
+    pub container_id: String,
 }
 
 /// Task tracker for managing background tasks and preventing leaks

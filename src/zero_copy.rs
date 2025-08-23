@@ -5,7 +5,7 @@
 
 use bytes::{Bytes, BytesMut};
 use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
 /// Zero-copy execution request using Bytes for immutable data
 #[derive(Debug, Clone)]

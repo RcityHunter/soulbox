@@ -6,7 +6,7 @@ use axum::{
     response::Response,
 };
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::audit::{

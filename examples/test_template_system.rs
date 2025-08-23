@@ -1,6 +1,8 @@
 use soulbox::container::ContainerManager;
 use soulbox::sandbox_manager::SandboxManager;
-use soulbox::template::{Template, TemplateManager, DockerfileParser};
+use soulbox::template::{TemplateManager, DockerfileParser};
+use soulbox::template::models::{Template, TemplateMetadata, RuntimeType, TemplateVersion, TemplateFile};
+use soulbox::container::resource_limits::ResourceLimits;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let default_templates = template_manager.get_default_templates();
     println!("   Found {} default templates:", default_templates.len());
     for (name, template) in &default_templates {
-        println!("   - {}: {} ({})", name, template.metadata.name, template.config.image);
+        println!("   - {}: {} ({})", name, template.metadata.name, template.base_image);
     }
     println!();
 
@@ -104,40 +106,16 @@ print(f"Sandbox ID: {sandbox_id}")
 
     // Test custom Dockerfile template
     println!("\n7. Testing custom Dockerfile template...");
-    let custom_template = Template {
-        metadata: soulbox::template::models::TemplateMetadata {
-            id: uuid::Uuid::new_v4(),
-            name: "FastAPI Template".to_string(),
-            slug: "fastapi".to_string(),
-            description: Some("Python FastAPI web application template".to_string()),
-            version: soulbox::template::models::TemplateVersion::new(1, 0, 0),
-            runtime_type: "python".to_string(),
-            is_public: true,
-            is_verified: false,
-            owner_id: uuid::Uuid::new_v4(),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        },
-        config: soulbox::template::models::TemplateConfig {
-            image: "python:3.11-slim".to_string(),
-            dockerfile: Some(dockerfile_content.to_string()),
-            env: Some(vec![
-                ("APP_ENV".to_string(), "development".to_string()),
-                ("API_VERSION".to_string(), "v1".to_string()),
-            ].into_iter().collect()),
-            setup_commands: Some(vec![
-                "echo '✅ Template initialized'".to_string(),
-                "python --version".to_string(),
-            ]),
-            cpu_limit: Some(1024),
-            memory_limit: Some(512 * 1024 * 1024),
-            build_args: None,
-        },
-    };
+    let custom_template = Template::new(
+        "FastAPI Template".to_string(),
+        "fastapi".to_string(),
+        RuntimeType::Python,
+        "python:3.11-slim".to_string(),
+    );
 
     println!("   Template: {}", custom_template.metadata.name);
     println!("   Runtime: {}", custom_template.metadata.runtime_type);
-    println!("   Has Dockerfile: {}", custom_template.config.dockerfile.is_some());
+    println!("   Base Image: {}", custom_template.base_image);
     
     // Note: Building from Dockerfile requires Docker BuildKit
     // For now, we'll use the pre-built image

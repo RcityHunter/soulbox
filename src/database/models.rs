@@ -34,7 +34,7 @@ pub struct DbApiKey {
     pub updated_at: DateTime<Utc>,
 }
 
-use crate::audit::models::{AuditLog, AuditEventType, AuditSeverity, AuditResult};
+use crate::audit::models::AuditLog;
 use crate::auth::models::Role;
 
 /// 数据库审计日志模型
@@ -217,7 +217,7 @@ impl DbAuditLog {
     
     /// 转换为领域模型
     pub fn to_domain_model(&self) -> Result<AuditLog, String> {
-        use std::str::FromStr;
+        
         
         // 解析枚举类型
         let event_type = parse_enum(&self.event_type, "AuditEventType")?;

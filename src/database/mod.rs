@@ -4,6 +4,8 @@ pub mod models;
 pub mod repositories;
 pub mod migrations;  // SurrealDB schema initialization
 pub mod surrealdb;
+pub mod health_check;
+pub mod batch_operations;
 
 // Legacy exports for backward compatibility (commented out for SurrealDB migration)
 // pub use config::{DatabaseConfig, DatabaseType, PoolConfig};
@@ -18,6 +20,8 @@ pub use surrealdb::{
 
 pub use repositories::*;
 pub use migrations::MigrationManager;
+pub use health_check::{DatabaseHealthChecker, HealthCheckReport, CheckStatus, PerformanceStats};
+pub use batch_operations::BatchOperations;
 // use surrealdb::sql::Value;
 
 /// 数据库错误类型

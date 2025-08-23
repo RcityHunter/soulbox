@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Query, State},
+    extract::State,
     http::StatusCode,
     response::Json,
     routing::{get, post, put},
@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::auth::{
     middleware::{AuthExtractor, AuthMiddleware},
-    models::{Permission, Role, User},
+    models::{Permission, Role},
 };
 use crate::api::auth::AuthState;
 use tracing::{info, warn};
@@ -265,7 +265,7 @@ async fn assign_role(
     // Implement actual role assignment logic
     if let Some(user_repo) = &auth_state.user_repository {
         match user_repo.find_by_id(request.user_id).await {
-            Ok(Some(mut db_user)) => {
+            Ok(Some(db_user)) => {
                 // Update user role in the database
                 let mut domain_user = db_user.to_domain_model().map_err(|e| {
                     warn!("Failed to convert user from database: {}", e);

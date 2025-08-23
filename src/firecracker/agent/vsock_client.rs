@@ -3,7 +3,7 @@ use tokio::net::UnixStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::path::Path;
 use std::time::Duration;
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, debug};
 
 use super::protocol::{VsockMessage, ExecutionRequest, ExecutionResponse, StreamEvent};
 

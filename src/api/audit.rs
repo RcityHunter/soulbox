@@ -5,7 +5,7 @@ use axum::{
     routing::get,
     Router,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -16,7 +16,7 @@ use crate::audit::{
     service::AuditService,
 };
 use crate::auth::{
-    middleware::{AuthExtractor, AuthMiddleware},
+    middleware::AuthExtractor,
     models::Permission,
 };
 

@@ -1,7 +1,7 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque, BTreeMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{RwLock, Semaphore};
+use tokio::sync::{RwLock, Semaphore, mpsc};
 use tracing::{info, warn, error, debug};
 
 use crate::error::{Result, SoulBoxError};
@@ -191,23 +191,29 @@ impl Drop for ContainerHandle {
     }
 }
 
-/// Pre-warmed container pool for fast container startup
-pub struct ContainerPool {
-    /// Pool configuration
-    config: PoolConfig,
-    /// Container manager for creating/destroying containers
-    container_manager: Arc<ContainerManager>,
-    /// Pool of available containers by runtime
-    pools: Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
-    /// Semaphores for limiting concurrent container operations per runtime
-    semaphores: HashMap<RuntimeType, Arc<Semaphore>>,
-    /// Background task handle
-    maintenance_task: Option<tokio::task::JoinHandle<()>>,
-    /// Pool statistics
-    stats: Arc<RwLock<PoolStats>>,
+/// Container cache levels for multi-tier caching
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CacheLevel {
+    /// Hot cache - immediately available, fully warmed up
+    Hot,
+    /// Warm cache - started but not fully initialized
+    Warm,
+    /// Cold cache - created but not started
+    Cold,
 }
 
-/// Pool statistics
+/// Result of a comprehensive health check
+#[derive(Debug, Clone)]
+pub struct HealthCheckResult {
+    /// Overall health status
+    pub healthy: bool,
+    /// Whether the runtime is responsive
+    pub runtime_responsive: bool,
+    /// Error message if unhealthy
+    pub error_message: Option<String>,
+}
+
+/// Pool statistics for monitoring and optimization
 #[derive(Debug, Clone, Default)]
 pub struct PoolStats {
     /// Total containers created
@@ -218,21 +224,148 @@ pub struct PoolStats {
     pub total_served: u64,
     /// Average container startup time
     pub avg_startup_time: Duration,
-    /// Pool hit rate (percentage)
-    pub hit_rate: f64,
-    /// Runtime-specific stats
+    /// Current pool sizes
+    pub hot_pool_size: usize,
+    pub warm_pool_size: usize,
+    pub cold_pool_size: usize,
+    pub total_pool_size: usize,
+    /// Pool efficiency metrics
+    pub hot_pool_efficiency: f64,
+    pub avg_container_age_seconds: u64,
+    /// Runtime-specific statistics
     pub runtime_stats: HashMap<RuntimeType, RuntimeStats>,
+    /// Overall hit rate
+    pub hit_rate: f64,
+}
+
+/// Runtime-specific statistics
+#[derive(Debug, Clone, Default)]
+pub struct RuntimeStats {
+    /// Total requests for this runtime
+    pub total_requests: u64,
+    /// Pool hits (containers were available)
+    pub pool_hits: u64,
+    /// Pool misses (new container had to be created)
+    pub pool_misses: u64,
+    /// Hit rate percentage
+    pub hit_rate: f64,
+    /// Available containers in all pools
+    pub containers_available: usize,
+    /// Containers currently in use
+    pub containers_in_use: usize,
+}
+
+/// Runtime usage pattern for optimization
+#[derive(Debug, Clone)]
+pub struct RuntimeUsagePattern {
+    /// Average requests per hour
+    pub requests_per_hour: f64,
+    /// Average execution time in milliseconds
+    pub avg_execution_time_ms: f64,
+    /// Peak concurrent containers needed
+    pub peak_concurrency: usize,
+    /// Success rate (0.0 to 1.0)
+    pub success_rate: f64,
+}
+
+/// Prediction model for container demand
+#[derive(Debug, Clone)]
+struct DemandPredictor {
+    /// Historical usage data by time window
+    usage_history: BTreeMap<i64, RuntimeUsage>,
+    /// Prediction confidence threshold
+    confidence_threshold: f64,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct RuntimeStats {
-    pub containers_available: usize,
-    pub containers_in_use: usize,
-    pub total_requests: u64,
-    pub pool_hits: u64,
-    pub avg_wait_time: Duration,
-    pub hit_rate: f64,
+struct RuntimeUsage {
+    python_requests: u64,
+    nodejs_requests: u64,
+    rust_requests: u64,
+    other_requests: u64,
 }
+
+impl DemandPredictor {
+    fn new() -> Self {
+        Self {
+            usage_history: BTreeMap::new(),
+            confidence_threshold: 0.7,
+        }
+    }
+    
+    /// Predict demand for the next time window
+    fn predict_demand(&self, runtime: &RuntimeType) -> usize {
+        // Simple moving average prediction
+        let recent_windows = 5;
+        let recent_usage: Vec<u64> = self.usage_history
+            .iter()
+            .rev()
+            .take(recent_windows)
+            .map(|(_, usage)| match runtime {
+                RuntimeType::Python => usage.python_requests,
+                RuntimeType::NodeJS => usage.nodejs_requests,
+                RuntimeType::Rust => usage.rust_requests,
+                _ => usage.other_requests,
+            })
+            .collect();
+        
+        if recent_usage.is_empty() {
+            return 2; // Default prediction
+        }
+        
+        let avg = recent_usage.iter().sum::<u64>() as f64 / recent_usage.len() as f64;
+        (avg * 1.2) as usize // Add 20% buffer
+    }
+    
+    /// Record usage for learning
+    fn record_usage(&mut self, runtime: &RuntimeType) {
+        let timestamp = chrono::Utc::now().timestamp();
+        let window = timestamp / 300; // 5-minute windows
+        
+        let usage = self.usage_history.entry(window).or_default();
+        match runtime {
+            RuntimeType::Python => usage.python_requests += 1,
+            RuntimeType::NodeJS => usage.nodejs_requests += 1,
+            RuntimeType::Rust => usage.rust_requests += 1,
+            _ => usage.other_requests += 1,
+        }
+        
+        // Keep only last 24 hours of data
+        let cutoff = window - (24 * 60 / 5);
+        self.usage_history.retain(|&k, _| k > cutoff);
+    }
+}
+
+/// Pre-warmed container pool for fast container startup
+pub struct ContainerPool {
+    /// Pool configuration
+    config: PoolConfig,
+    /// Container manager for creating/destroying containers
+    container_manager: Arc<ContainerManager>,
+    /// Multi-tier cache pools by runtime and cache level
+    hot_pools: Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
+    warm_pools: Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
+    cold_pools: Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
+    /// Semaphores for limiting concurrent container operations per runtime
+    semaphores: HashMap<RuntimeType, Arc<Semaphore>>,
+    /// Background task handle
+    maintenance_task: Option<tokio::task::JoinHandle<()>>,
+    /// Pool statistics
+    stats: Arc<RwLock<PoolStats>>,
+    /// Demand predictor for intelligent pre-warming
+    predictor: Arc<RwLock<DemandPredictor>>,
+    /// Channel for async container warming
+    warming_tx: mpsc::Sender<WarmingRequest>,
+    warming_rx: Arc<RwLock<mpsc::Receiver<WarmingRequest>>>,
+}
+
+#[derive(Debug)]
+struct WarmingRequest {
+    runtime: RuntimeType,
+    target_level: CacheLevel,
+}
+
+// Duplicate struct definitions removed - keeping the ones above
 
 impl ContainerPool {
     /// Create a new container pool
@@ -246,14 +379,22 @@ impl ContainerPool {
                 Arc::new(Semaphore::new(runtime_config.max_containers)),
             );
         }
+        
+        // Create warming channel
+        let (warming_tx, warming_rx) = mpsc::channel(100);
 
         Self {
             config,
             container_manager,
-            pools: Arc::new(RwLock::new(HashMap::new())),
+            hot_pools: Arc::new(RwLock::new(HashMap::new())),
+            warm_pools: Arc::new(RwLock::new(HashMap::new())),
+            cold_pools: Arc::new(RwLock::new(HashMap::new())),
             semaphores,
             maintenance_task: None,
             stats: Arc::new(RwLock::new(PoolStats::default())),
+            predictor: Arc::new(RwLock::new(DemandPredictor::new())),
+            warming_tx,
+            warming_rx: Arc::new(RwLock::new(warming_rx)),
         }
     }
 
@@ -261,11 +402,16 @@ impl ContainerPool {
     pub async fn initialize(&mut self) -> Result<()> {
         info!("Initializing container pool with config: {:?}", self.config);
 
-        // Initialize pools for each runtime
+        // Initialize all cache levels for each runtime
         {
-            let mut pools = self.pools.write().await;
+            let mut hot_pools = self.hot_pools.write().await;
+            let mut warm_pools = self.warm_pools.write().await;
+            let mut cold_pools = self.cold_pools.write().await;
+            
             for runtime in self.config.runtime_configs.keys() {
-                pools.insert(runtime.clone(), VecDeque::new());
+                hot_pools.insert(runtime.clone(), VecDeque::new());
+                warm_pools.insert(runtime.clone(), VecDeque::new());
+                cold_pools.insert(runtime.clone(), VecDeque::new());
             }
         }
 
@@ -285,8 +431,8 @@ impl ContainerPool {
     pub async fn get_container(&self, runtime: RuntimeType) -> Result<String> {
         let start_time = Instant::now();
         
-        // Try to get from pool first
-        if let Some(container) = self.get_from_pool(&runtime).await {
+        // Try to get from hot pool first (fastest)
+        if let Some(container) = self.get_from_hot_pool(&runtime).await {
             let mut stats = self.stats.write().await;
             stats.total_served += 1;
             
@@ -322,9 +468,9 @@ impl ContainerPool {
             return Ok(());
         }
 
-        // Return to pool
-        let mut pools = self.pools.write().await;
-        if let Some(pool) = pools.get_mut(&runtime) {
+        // Return to appropriate pool based on container state
+        let mut hot_pools = self.hot_pools.write().await;
+        if let Some(pool) = hot_pools.get_mut(&runtime) {
             let mut container = PoolContainer::new(container_id.clone(), runtime.clone());
             container.mark_released();
             container.warmed_up = true;
@@ -351,15 +497,67 @@ impl ContainerPool {
         Ok(())
     }
 
-    /// Get a container from the pool if available
-    async fn get_from_pool(&self, runtime: &RuntimeType) -> Option<PoolContainer> {
-        let mut pools = self.pools.write().await;
-        if let Some(pool) = pools.get_mut(runtime) {
+    /// Get a container from hot pool (fastest)
+    async fn get_from_hot_pool(&self, runtime: &RuntimeType) -> Option<PoolContainer> {
+        let mut hot_pools = self.hot_pools.write().await;
+        if let Some(pool) = hot_pools.get_mut(runtime) {
             // Find an available, healthy container
             for i in 0..pool.len() {
-                if !pool[i].in_use && pool[i].healthy {
+                if !pool[i].in_use && pool[i].healthy && pool[i].warmed_up {
                     let mut container = pool.remove(i).unwrap();
                     container.mark_in_use();
+                    return Some(container);
+                }
+            }
+        }
+        
+        // If not found in hot pool, try warm pool
+        if let Some(container) = self.get_from_warm_pool(runtime).await {
+            return Some(container);
+        }
+        
+        // Finally, try cold pool
+        self.get_from_cold_pool(runtime).await
+    }
+    
+    /// Get a container from warm pool (medium speed)
+    async fn get_from_warm_pool(&self, runtime: &RuntimeType) -> Option<PoolContainer> {
+        let mut warm_pools = self.warm_pools.write().await;
+        if let Some(pool) = warm_pools.get_mut(runtime) {
+            for i in 0..pool.len() {
+                if !pool[i].in_use && pool[i].healthy {
+                    let mut container = pool.remove(i)?;
+                    container.mark_in_use();
+                    
+                    // Promote to hot pool after warming
+                    // Simplified for MVP - would send warming request in production
+                    
+                    return Some(container);
+                }
+            }
+        }
+        None
+    }
+    
+    /// Get a container from cold pool (slowest)
+    async fn get_from_cold_pool(&self, runtime: &RuntimeType) -> Option<PoolContainer> {
+        let mut cold_pools = self.cold_pools.write().await;
+        if let Some(pool) = cold_pools.get_mut(runtime) {
+            for i in 0..pool.len() {
+                if !pool[i].in_use {
+                    let mut container = pool.remove(i)?;
+                    
+                    // Start the container (it's created but not running)
+                    if let Err(e) = self.container_manager.start_container(&container.id).await {
+                        error!("Failed to start cold container {}: {}", container.id, e);
+                        continue;
+                    }
+                    
+                    container.mark_in_use();
+                    
+                    // Promote to warm pool after starting  
+                    // Simplified for MVP - would send warming request in production
+                    
                     return Some(container);
                 }
             }
@@ -518,33 +716,75 @@ impl ContainerPool {
         container_id: &str,
         warmup_cmd: &str,
     ) -> Result<()> {
-        // Implementation would execute warmup command in container
-        // For now, just return Ok to avoid compilation issues
+        // Split command into parts for execute_command
+        let command_parts: Vec<&str> = warmup_cmd.split_whitespace().collect();
+        if command_parts.is_empty() {
+            return Err(SoulBoxError::PoolError("Empty warmup command".to_string()));
+        }
+        
         info!("Warming up container {} with command: {}", container_id, warmup_cmd);
-        Ok(())
+        
+        match manager.execute_command(container_id, &command_parts).await {
+            Ok(output) => {
+                debug!("Container {} warmed up successfully with output: {}", container_id, output.trim());
+                Ok(())
+            }
+            Err(e) => {
+                warn!("Warmup command failed for container {}: {}", container_id, e);
+                // Don't fail container creation if warmup fails - it's a nice-to-have
+                Ok(())
+            }
+        }
     }
 
-    /// Pre-warm containers for all runtimes
+    /// Pre-warm containers for all runtimes with parallel execution
     async fn prewarm_containers(&self) -> Result<()> {
         info!("Pre-warming containers...");
 
+        let mut prewarming_tasks = Vec::new();
+
         for (runtime, runtime_config) in &self.config.runtime_configs {
-            for _ in 0..runtime_config.min_containers {
-                match self.create_new_container(runtime).await {
-                    Ok(container_id) => {
-                        // Add to pool
-                        if let Err(e) = self.return_container(container_id, runtime.clone()).await {
-                            error!("Failed to add pre-warmed container to pool: {}", e);
+            let runtime = runtime.clone();
+            let pool = self.clone();
+            let min_containers = runtime_config.min_containers;
+            
+            let task = tokio::spawn(async move {
+                let mut successful_containers = 0;
+                
+                for i in 0..min_containers {
+                    match pool.create_new_container(&runtime).await {
+                        Ok(container_id) => {
+                            // Add to pool
+                            if let Err(e) = pool.return_container(container_id.clone(), runtime.clone()).await {
+                                error!("Failed to add pre-warmed container {} to pool: {}", container_id, e);
+                            } else {
+                                successful_containers += 1;
+                                debug!("Pre-warmed container {}/{} for runtime {:?}", i + 1, min_containers, runtime);
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to pre-warm container {}/{} for runtime {:?}: {}", i + 1, min_containers, runtime, e);
                         }
                     }
-                    Err(e) => {
-                        error!("Failed to pre-warm container for runtime {:?}: {}", runtime, e);
-                    }
                 }
+                
+                info!("Pre-warmed {}/{} containers for runtime {:?}", successful_containers, min_containers, runtime);
+                successful_containers
+            });
+            
+            prewarming_tasks.push((runtime, task));
+        }
+
+        // Wait for all prewarming tasks to complete
+        let mut total_prewarmed = 0;
+        for (runtime, task) in prewarming_tasks {
+            match task.await {
+                Ok(count) => total_prewarmed += count,
+                Err(e) => error!("Pre-warming task failed for runtime {:?}: {}", runtime, e),
             }
         }
 
-        info!("Container pre-warming completed");
+        info!("Container pre-warming completed: {} total containers pre-warmed", total_prewarmed);
         Ok(())
     }
 
@@ -552,12 +792,18 @@ impl ContainerPool {
     async fn warmup_container(&self, container_id: &str, command: &str) -> Result<()> {
         let timeout = Duration::from_secs(self.config.warmup_timeout);
         
+        // Split command into parts for execute_command
+        let command_parts: Vec<&str> = command.split_whitespace().collect();
+        if command_parts.is_empty() {
+            return Err(SoulBoxError::PoolError("Empty warmup command".to_string()));
+        }
+        
         match tokio::time::timeout(
             timeout,
-            self.container_manager.execute_command(container_id, &[command])
+            self.container_manager.execute_command(container_id, &command_parts)
         ).await {
-            Ok(Ok(_)) => {
-                debug!("Container {} warmed up successfully", container_id);
+            Ok(Ok(output)) => {
+                debug!("Container {} warmed up successfully with output: {}", container_id, output.trim());
                 Ok(())
             }
             Ok(Err(e)) => {
@@ -569,18 +815,91 @@ impl ContainerPool {
         }
     }
 
-    /// Check container health
+    /// Check container health with comprehensive checks
     async fn check_container_health(&self, container_id: &str) -> Result<bool> {
         match self.container_manager.get_container_info(container_id).await {
             Ok(info) => {
                 // Check if container state indicates it's running
-                Ok(info.state
+                let is_running = info.state
                     .as_ref()
                     .and_then(|state| state.status.as_ref())
                     .map(|status| matches!(status, bollard::models::ContainerStateStatusEnum::RUNNING))
-                    .unwrap_or(false))
+                    .unwrap_or(false);
+                
+                if !is_running {
+                    debug!("Container {} is not running", container_id);
+                    return Ok(false);
+                }
+                
+                // Additional health checks
+                let has_exit_code = info.state
+                    .as_ref()
+                    .and_then(|state| state.exit_code)
+                    .unwrap_or(0) == 0;
+                
+                let is_restarting = info.state
+                    .as_ref()
+                    .and_then(|state| state.restarting)
+                    .unwrap_or(false);
+                
+                let health_status = !is_restarting && has_exit_code;
+                
+                debug!("Container {} health check: running={}, exit_code=ok={}, not_restarting={}, overall={}", 
+                       container_id, is_running, has_exit_code, !is_restarting, health_status);
+                
+                Ok(health_status)
             },
-            Err(_) => Ok(false),
+            Err(e) => {
+                debug!("Failed to get container {} info: {}", container_id, e);
+                Ok(false)
+            },
+        }
+    }
+    
+    /// Perform comprehensive health check with runtime-specific validation
+    async fn comprehensive_health_check(&self, container_id: &str, runtime: &RuntimeType) -> Result<HealthCheckResult> {
+        // Basic container state check
+        let basic_health = self.check_container_health(container_id).await?;
+        if !basic_health {
+            return Ok(HealthCheckResult {
+                healthy: false,
+                runtime_responsive: false,
+                error_message: Some("Container is not in running state".to_string()),
+            });
+        }
+        
+        // Runtime-specific health check
+        let runtime_config = self.config.runtime_configs.get(runtime);
+        if let Some(config) = runtime_config {
+            if let Some(warmup_cmd) = &config.warmup_command {
+                // Use warmup command as a simple runtime health check
+                match self.warmup_container(container_id, warmup_cmd).await {
+                    Ok(()) => Ok(HealthCheckResult {
+                        healthy: true,
+                        runtime_responsive: true,
+                        error_message: None,
+                    }),
+                    Err(e) => Ok(HealthCheckResult {
+                        healthy: false,
+                        runtime_responsive: false,
+                        error_message: Some(format!("Runtime health check failed: {}", e)),
+                    }),
+                }
+            } else {
+                // No runtime-specific check available, basic health is sufficient
+                Ok(HealthCheckResult {
+                    healthy: true,
+                    runtime_responsive: true,
+                    error_message: None,
+                })
+            }
+        } else {
+            // No configuration available, assume healthy if basic checks pass
+            Ok(HealthCheckResult {
+                healthy: true,
+                runtime_responsive: true,
+                error_message: None,
+            })
         }
     }
 
@@ -603,10 +922,13 @@ impl ContainerPool {
 
     /// Start the maintenance task
     async fn start_maintenance_task(&mut self) {
-        let pools = self.pools.clone();
+        let hot_pools = self.hot_pools.clone();
+        let warm_pools = self.warm_pools.clone();
+        let cold_pools = self.cold_pools.clone();
         let config = self.config.clone();
         let stats = self.stats.clone();
         let container_manager = self.container_manager.clone();
+        let predictor = self.predictor.clone();
 
         let maintenance_task = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(config.maintenance_interval));
@@ -615,10 +937,13 @@ impl ContainerPool {
                 interval.tick().await;
                 
                 if let Err(e) = Self::maintenance_cycle(
-                    &pools,
+                    &hot_pools,
+                    &warm_pools,
+                    &cold_pools,
                     &config,
                     &stats,
                     &container_manager,
+                    &predictor,
                 ).await {
                     error!("Pool maintenance error: {}", e);
                 }
@@ -631,20 +956,26 @@ impl ContainerPool {
 
     /// Perform maintenance cycle
     async fn maintenance_cycle(
-        pools: &Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
+        hot_pools: &Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
+        warm_pools: &Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
+        cold_pools: &Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
         config: &PoolConfig,
         stats: &Arc<RwLock<PoolStats>>,
         container_manager: &Arc<ContainerManager>,
+        predictor: &Arc<RwLock<DemandPredictor>>,
     ) -> Result<()> {
         let max_idle = Duration::from_secs(config.max_idle_time);
         let mut containers_to_destroy = Vec::new();
         let mut containers_to_create = HashMap::new();
 
-        // Check each runtime pool
+        // Check each runtime pool level
         {
-            let mut pools_guard = pools.write().await;
+            let mut hot_pools_guard = hot_pools.write().await;
+            let mut warm_pools_guard = warm_pools.write().await;
+            let mut cold_pools_guard = cold_pools.write().await;
             
-            for (runtime, pool) in pools_guard.iter_mut() {
+            // Process hot pools
+            for (runtime, pool) in hot_pools_guard.iter_mut() {
                 let runtime_config = config.runtime_configs.get(runtime)
                     .ok_or_else(|| SoulBoxError::PoolError(format!("No config for runtime {:?}", runtime)))?;
 
@@ -680,6 +1011,9 @@ impl ContainerPool {
             let mut stats_guard = stats.write().await;
             stats_guard.total_destroyed += 1;
         }
+        
+        // Perform health checks on remaining containers
+        Self::perform_health_checks(hot_pools, warm_pools, cold_pools, container_manager, config).await;
 
         // Create needed containers
         for (runtime, count) in containers_to_create {
@@ -695,8 +1029,8 @@ impl ContainerPool {
                         pool_container.warmed_up = true;
                         pool_container.healthy = true;
                         
-                        let mut pools_guard = pools.write().await;
-                        if let Some(pool) = pools_guard.get_mut(&runtime) {
+                        let mut hot_pools_guard = hot_pools.write().await;
+                        if let Some(pool) = hot_pools_guard.get_mut(&runtime) {
                             pool.push_back(pool_container);
                             debug!("Created and added container {} to pool for runtime {:?}", container_id, runtime);
                         }
@@ -712,7 +1046,7 @@ impl ContainerPool {
         }
 
         // Update pool statistics
-        Self::update_pool_stats(pools, stats).await;
+        Self::update_pool_stats(hot_pools, warm_pools, cold_pools, stats).await;
 
         Ok(())
     }
@@ -782,17 +1116,28 @@ impl ContainerPool {
 
     /// Update pool statistics
     async fn update_pool_stats(
-        pools: &Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
+        hot_pools: &Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
+        warm_pools: &Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
+        cold_pools: &Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
         stats: &Arc<RwLock<PoolStats>>,
     ) {
-        let pools_guard = pools.read().await;
+        let hot_pools_guard = hot_pools.read().await;
+        let warm_pools_guard = warm_pools.read().await;
+        let cold_pools_guard = cold_pools.read().await;
         let mut stats_guard = stats.write().await;
 
-        for (runtime, pool) in pools_guard.iter() {
+        // Combine stats from all pool levels
+        for (runtime, hot_pool) in hot_pools_guard.iter() {
+            let warm_pool = warm_pools_guard.get(runtime);
+            let cold_pool = cold_pools_guard.get(runtime);
             let runtime_stats = stats_guard.runtime_stats.entry(runtime.clone()).or_default();
             
-            runtime_stats.containers_available = pool.iter().filter(|c| !c.in_use).count();
-            runtime_stats.containers_in_use = pool.iter().filter(|c| c.in_use).count();
+            runtime_stats.containers_available = hot_pool.iter().filter(|c| !c.in_use).count()
+                + warm_pool.map_or(0, |p| p.iter().filter(|c| !c.in_use).count())
+                + cold_pool.map_or(0, |p| p.iter().filter(|c| !c.in_use).count());
+            runtime_stats.containers_in_use = hot_pool.iter().filter(|c| c.in_use).count()
+                + warm_pool.map_or(0, |p| p.iter().filter(|c| c.in_use).count())
+                + cold_pool.map_or(0, |p| p.iter().filter(|c| c.in_use).count());
             
             if runtime_stats.total_requests > 0 {
                 runtime_stats.hit_rate = (runtime_stats.pool_hits as f64 / runtime_stats.total_requests as f64) * 100.0;
@@ -823,9 +1168,12 @@ impl ContainerPool {
             task.abort();
         }
 
-        // Destroy all containers in pools
-        let pools = self.pools.read().await;
-        for pool in pools.values() {
+        // Destroy all containers in all pool levels
+        let hot_pools = self.hot_pools.read().await;
+        let warm_pools = self.warm_pools.read().await;
+        let cold_pools = self.cold_pools.read().await;
+        
+        for pool in hot_pools.values().chain(warm_pools.values()).chain(cold_pools.values()) {
             for container in pool {
                 if let Err(e) = self.destroy_container(&container.id).await {
                     error!("Failed to destroy container {} during shutdown: {}", container.id, e);
@@ -835,6 +1183,196 @@ impl ContainerPool {
 
         info!("Container pool shutdown completed");
         Ok(())
+    }
+    
+// Duplicate get_stats method removed - keeping the one above
+    
+    /// Optimize pool configuration based on usage patterns
+    pub async fn optimize_pool_configuration(&self) -> Result<()> {
+        let stats = self.stats.read().await;
+        let current_efficiency = stats.hot_pool_efficiency;
+        
+        // If hot pool efficiency is too low (< 70%), adjust pool sizes
+        if current_efficiency < 70.0 {
+            info!("Pool efficiency is {}%, optimizing pool configuration", current_efficiency);
+            
+            // Analyze usage patterns by runtime
+            let usage_stats = self.analyze_runtime_usage().await;
+            
+            // Adjust pool sizes based on actual usage
+            for (runtime, usage) in usage_stats {
+                let current_config = self.config.runtime_configs.get(&runtime);
+                if let Some(config) = current_config {
+                    let recommended_min = std::cmp::max(1, (usage.requests_per_hour / 10.0) as usize);
+                    let recommended_max = std::cmp::max(recommended_min * 2, config.max_containers);
+                    
+                    if recommended_min != config.min_containers {
+                        info!(
+                            "Recommending pool size adjustment for {:?}: min {} -> {}, max {} -> {}",
+                            runtime, config.min_containers, recommended_min, config.max_containers, recommended_max
+                        );
+                    }
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Analyze runtime usage patterns
+    async fn analyze_runtime_usage(&self) -> HashMap<RuntimeType, RuntimeUsagePattern> {
+        // This would typically analyze historical data
+        // For now, return a simple analysis based on current pool states
+        let mut usage_patterns = HashMap::new();
+        
+        let hot_pools = self.hot_pools.read().await;
+        let stats = self.stats.read().await;
+        
+        for (runtime, pool) in hot_pools.iter() {
+            let usage_pattern = RuntimeUsagePattern {
+                requests_per_hour: pool.len() as f64 * 10.0, // Simplified calculation
+                avg_execution_time_ms: 500.0, // Default assumption
+                peak_concurrency: pool.len(),
+                success_rate: 0.95, // Default assumption
+            };
+            usage_patterns.insert(runtime.clone(), usage_pattern);
+        }
+        
+        usage_patterns
+    }
+    
+    /// Perform health checks on all containers in pools
+    async fn perform_health_checks(
+        hot_pools: &Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
+        warm_pools: &Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
+        cold_pools: &Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
+        container_manager: &Arc<ContainerManager>,
+        config: &PoolConfig,
+    ) {
+        let mut unhealthy_containers = Vec::new();
+        
+        // Check hot pools
+        {
+            let mut hot_pools_guard = hot_pools.write().await;
+            for (runtime, pool) in hot_pools_guard.iter_mut() {
+                let mut healthy_containers = VecDeque::new();
+                
+                while let Some(mut container) = pool.pop_front() {
+                    // Perform basic health check
+                    match Self::check_container_health_static(container_manager, &container.id).await {
+                        Ok(true) => {
+                            container.healthy = true;
+                            healthy_containers.push_back(container);
+                        }
+                        Ok(false) => {
+                            warn!("Container {} failed health check, removing from pool", container.id);
+                            container.healthy = false;
+                            unhealthy_containers.push(container.id);
+                        }
+                        Err(e) => {
+                            warn!("Error checking health of container {}: {}", container.id, e);
+                            unhealthy_containers.push(container.id);
+                        }
+                    }
+                }
+                
+                *pool = healthy_containers;
+            }
+        }
+        
+        // Check warm and cold pools similarly
+        Self::check_pool_health(warm_pools, container_manager, &mut unhealthy_containers).await;
+        Self::check_pool_health(cold_pools, container_manager, &mut unhealthy_containers).await;
+        
+        // Remove unhealthy containers and track runtime types for recovery
+        let mut runtime_recovery_count: std::collections::HashMap<crate::runtime::RuntimeType, usize> = std::collections::HashMap::new();
+        
+        for container_id in unhealthy_containers {
+            // Try to determine runtime type from container for recovery
+            if let Ok(info) = container_manager.get_container_info(&container_id).await {
+                if let Some(labels) = info.config.and_then(|c| c.labels) {
+                    if let Some(runtime_str) = labels.get("soulbox.runtime") {
+                        if let Ok(runtime_type) = runtime_str.parse::<crate::runtime::RuntimeType>() {
+                            *runtime_recovery_count.entry(runtime_type).or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
+            
+            if let Err(e) = container_manager.remove_container(&container_id).await {
+                error!("Failed to remove unhealthy container {}: {}", container_id, e);
+            } else {
+                info!("Removed unhealthy container: {}", container_id);
+            }
+        }
+        
+        // Proactively create replacement containers for removed unhealthy ones
+        for (runtime_type, count) in runtime_recovery_count {
+            debug!("Scheduling recovery of {} containers for runtime {:?}", count, runtime_type);
+            for _ in 0..count {
+                let manager_clone = container_manager.clone();
+                let config_clone = config.clone();
+                let runtime_clone = runtime_type.clone();
+                
+                // Schedule recovery in background to avoid blocking health checks
+                tokio::spawn(async move {
+                    match Self::create_container_for_runtime(&manager_clone, &runtime_clone, &config_clone).await {
+                        Ok(new_container_id) => {
+                            info!("Successfully created recovery container {} for runtime {:?}", new_container_id, runtime_clone);
+                            // Note: The new container will be picked up by the maintenance task
+                        }
+                        Err(e) => {
+                            warn!("Failed to create recovery container for runtime {:?}: {}", runtime_clone, e);
+                        }
+                    }
+                });
+            }
+        }
+    }
+    
+    /// Helper method to check health of a specific pool
+    async fn check_pool_health(
+        pools: &Arc<RwLock<HashMap<RuntimeType, VecDeque<PoolContainer>>>>,
+        container_manager: &Arc<ContainerManager>,
+        unhealthy_containers: &mut Vec<String>,
+    ) {
+        let mut pools_guard = pools.write().await;
+        for (runtime, pool) in pools_guard.iter_mut() {
+            let mut healthy_containers = VecDeque::new();
+            
+            while let Some(mut container) = pool.pop_front() {
+                match Self::check_container_health_static(container_manager, &container.id).await {
+                    Ok(true) => {
+                        container.healthy = true;
+                        healthy_containers.push_back(container);
+                    }
+                    Ok(false) | Err(_) => {
+                        unhealthy_containers.push(container.id);
+                    }
+                }
+            }
+            
+            *pool = healthy_containers;
+        }
+    }
+    
+    /// Static method to check container health (for use in static contexts)
+    async fn check_container_health_static(
+        container_manager: &Arc<ContainerManager>,
+        container_id: &str,
+    ) -> Result<bool> {
+        match container_manager.get_container_info(container_id).await {
+            Ok(info) => {
+                let is_running = info.state
+                    .as_ref()
+                    .and_then(|state| state.status.as_ref())
+                    .map(|status| matches!(status, bollard::models::ContainerStateStatusEnum::RUNNING))
+                    .unwrap_or(false);
+                    
+                Ok(is_running)
+            },
+            Err(_) => Ok(false),
+        }
     }
 }
 

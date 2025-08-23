@@ -1,5 +1,5 @@
 use std::process::Command;
-use tracing::{info, error};
+use tracing::info;
 use crate::error::Result;
 
 /// Network manager for Firecracker VMs

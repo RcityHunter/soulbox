@@ -8,9 +8,8 @@ use bollard::Docker;
 use bollard::image::BuildImageOptions;
 use futures_util::stream::StreamExt;
 use std::collections::HashMap;
-use std::path::Path;
 use tar::Builder;
-use tracing::{info, warn, error, debug};
+use tracing::{info, error, debug};
 
 /// Dockerfile parser and validator
 pub struct DockerfileParser {

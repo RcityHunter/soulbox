@@ -92,7 +92,7 @@ impl WebSocketHandler {
         self
     }
 
-    pub async fn handle_connection<S>(&self, mut ws_stream: WebSocketStream<S>) -> Result<()>
+    pub async fn handle_connection<S>(&self, ws_stream: WebSocketStream<S>) -> Result<()>
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
     {
@@ -120,7 +120,7 @@ impl WebSocketHandler {
         info!("WebSocket connection established: {}", connection_id);
 
         // Split the stream for concurrent reading and writing
-        let (mut sender, mut receiver) = ws_stream.split();
+        let (sender, mut receiver) = ws_stream.split();
         
         // Start heartbeat task
         let heartbeat_task = self.start_heartbeat_task(connection_id.clone(), sender);

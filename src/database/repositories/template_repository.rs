@@ -1,16 +1,16 @@
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{info, error, debug};
+use tracing::{info, debug};
 use uuid::Uuid;
 
 use crate::template::models::{
-    Template, TemplateMetadata, RuntimeType, ResourceLimits, TemplateFile, TemplateVersion,
+    Template, TemplateMetadata, ResourceLimits, TemplateFile, TemplateVersion,
     CreateTemplateRequest, UpdateTemplateRequest, TemplateFileUpload
 };
 use crate::database::surrealdb::{
-    SurrealPool, SurrealOperations, uuid_to_record_id, record_id_to_uuid
+    SurrealPool, SurrealOperations, uuid_to_record_id
 };
 use crate::database::{DatabaseError, DatabaseResult};
 

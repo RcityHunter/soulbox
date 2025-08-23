@@ -1,6 +1,6 @@
 use axum::{
     extract::{Request, State},
-    http::{header::AUTHORIZATION, HeaderValue, StatusCode},
+    http::{header::AUTHORIZATION, StatusCode},
     middleware::Next,
     response::Response,
 };
@@ -8,10 +8,8 @@ use std::sync::Arc;
 use tracing::{warn, debug};
 
 use super::{JwtManager, Claims};
-use super::models::{User, Permission, Role};
-use crate::audit::{AuditService, AuditMiddleware, AuditEventType};
-use crate::error::SoulBoxError;
-use crate::validation::InputValidator;
+use super::models::{Permission, Role};
+use crate::audit::{AuditMiddleware, AuditEventType};
 
 /// 认证提取器 - 从请求中提取用户信息
 #[derive(Debug, Clone)]

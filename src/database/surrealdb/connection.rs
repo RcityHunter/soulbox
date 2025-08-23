@@ -8,7 +8,7 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
 use tracing::{info, warn, error, debug};
 
-use super::config::{SurrealConfig, SurrealProtocol};
+use super::config::SurrealConfig;
 
 /// SurrealDB 连接错误
 #[derive(Debug, thiserror::Error)]
@@ -478,6 +478,7 @@ impl Drop for SurrealConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::SurrealProtocol;
     
     #[tokio::test]
     async fn test_memory_connection_pool() {

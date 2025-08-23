@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -676,7 +676,7 @@ impl AuditService {
         // Datadog Logs API 集成
         if let (Ok(dd_api_key), Ok(dd_site)) = (
             std::env::var("DATADOG_API_KEY"),
-            std::env::var("DATADOG_SITE").or_else(|_| Ok("datadoghq.com".to_string()))
+            std::env::var("DATADOG_SITE").or_else(|_| Ok::<String, std::env::VarError>("datadoghq.com".to_string()))
         ) {
             let dd_log = serde_json::json!({
                 "ddsource": "soulbox",

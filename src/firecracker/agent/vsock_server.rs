@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::path::Path;
 use tracing::{info, warn, error, debug};
 
-use super::protocol::{VsockMessage, ExecutionRequest, ExecutionResponse, StreamEvent};
+use super::protocol::{VsockMessage, ExecutionRequest, StreamEvent};
 use super::executor::CodeExecutor;
 
 /// Vsock 服务器（Guest VM 端）

@@ -1,5 +1,5 @@
 use soulbox::soulbox::v1::*;
-use soulbox::soulbox_grpc::streaming_service_server::StreamingService;
+use soulbox::grpc::service_traits::StreamingService;
 use soulbox::grpc::streaming_service::StreamingServiceImpl;
 use tonic::{Request, Status};
 use tokio_stream::StreamExt;

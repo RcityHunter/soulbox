@@ -15,6 +15,7 @@ categories = ["development-tools", "web-programming", "api-bindings"]
 default = ["server", "client"]
 server = []
 client = []
+dev-tools = []
 
 [dependencies]
 # Async runtime
@@ -98,6 +99,12 @@ redis = { version = "0.24", features = ["async-std-comp"] }
 # Additional dependencies for restored modules
 tokio-stream = "0.1"
 async-stream = "0.3"
+
+# CLI dependencies
+clap = { version = "4.5", features = ["derive"] }
+colored = "2.1"
+indicatif = "0.17"
+dirs = "5.0"
 rust_decimal = { version = "1.37", features = ["serde"] }
 tempfile = "3.10"
 notify = "6.1"
@@ -108,7 +115,16 @@ tonic-build = "0.14"
 prost-build = "0.12"
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
+proptest = "1.4"
+test-case = "3.1"
 tokio-test = "0.4"
 reqwest = { version = "0.11", features = ["json"] }
-proptest = "1.4"
-futures = "0.3"
+
+[[bench]]
+name = "performance"
+harness = false
+
+[[bench]]
+name = "simple_performance"
+harness = false

@@ -1,24 +1,16 @@
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio_stream::{Stream, StreamExt};
+use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{info, error};
 use uuid::Uuid;
 
 // Import generated protobuf types
 pub use crate::soulbox::v1::*;
-use crate::soulbox::v1::{
-    TerminalStreamResponse, TerminalStreamRequest, SandboxStreamResponse, SandboxStreamRequest, 
-    StreamType, OutputType, sandbox_stream_response, sandbox_stream_request, 
-    terminal_stream_response, terminal_stream_request,
-    SandboxStreamOutput, SandboxStreamReady, SandboxStreamError, SandboxStreamClosed,
-    TerminalReady, TerminalError, TerminalClosed, TerminalOutput
-};
 
 // Import service traits from our manually defined module
-use crate::soulbox_grpc::streaming_service_server;
+use crate::grpc::service_traits::StreamingService;
 
 #[derive(Debug)]
 pub struct StreamingServiceImpl {
@@ -42,13 +34,13 @@ impl StreamingServiceImpl {
 }
 
 #[tonic::async_trait]
-impl streaming_service_server::StreamingService for StreamingServiceImpl {
+impl StreamingService for StreamingServiceImpl {
     type SandboxStreamStream = std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<SandboxStreamResponse, Status>> + Send>>;
 
     async fn sandbox_stream(
         &self,
         request: Request<Streaming<SandboxStreamRequest>>,
-    ) -> Result<Response<<Self as streaming_service_server::StreamingService>::SandboxStreamStream>, Status> {
+    ) -> Result<Response<Self::SandboxStreamStream>, Status> {
         let mut stream = request.into_inner();
         let active_streams = Arc::clone(&self.active_streams);
         
@@ -194,7 +186,7 @@ impl streaming_service_server::StreamingService for StreamingServiceImpl {
     async fn terminal_stream(
         &self,
         request: Request<Streaming<TerminalStreamRequest>>,
-    ) -> Result<Response<<Self as streaming_service_server::StreamingService>::TerminalStreamStream>, Status> {
+    ) -> Result<Response<Self::TerminalStreamStream>, Status> {
         let mut stream = request.into_inner();
         let active_terminals = Arc::clone(&self.active_terminals);
         

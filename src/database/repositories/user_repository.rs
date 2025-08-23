@@ -1,12 +1,12 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{info, error, debug};
+use tracing::{info, debug};
 use uuid::Uuid;
 
 use crate::auth::models::{User, Role};
 use crate::database::surrealdb::{
-    SurrealPool, SurrealOperations, uuid_to_record_id, record_id_to_uuid
+    SurrealPool, SurrealOperations, uuid_to_record_id
 };
 // use surrealdb::sql::Value;
 use crate::database::{DatabaseError, DatabaseResult, models::DbUser};
@@ -36,6 +36,34 @@ impl UserRepository {
         Self { pool }
     }
     
+    /// 执行带事务的操作
+    pub async fn with_transaction<F, R, Fut>(&self, operation: F) -> DatabaseResult<R>
+    where
+        F: FnOnce(&SurrealOperations<'_>) -> Fut,
+        Fut: std::future::Future<Output = DatabaseResult<R>> + Send,
+    {
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        let ops = SurrealOperations::new(&conn);
+        
+        ops.begin_transaction().await
+            .map_err(|e| DatabaseError::Transaction(e.to_string()))?;
+        
+        match operation(&ops).await {
+            Ok(result) => {
+                ops.commit_transaction().await
+                    .map_err(|e| DatabaseError::Transaction(e.to_string()))?;
+                Ok(result)
+            }
+            Err(error) => {
+                ops.rollback_transaction().await
+                    .map_err(|e| DatabaseError::Transaction(e.to_string()))?;
+                Err(error)
+            }
+        }
+    }
+    
     /// 创建用户
     pub async fn create(&self, user: &User, password_hash: &str) -> DatabaseResult<()> {
         debug!("创建用户: {}", user.username);
@@ -58,11 +86,26 @@ impl UserRepository {
             last_login: user.last_login,
         };
         
-        ops.create("users", &surreal_user).await
-            .map_err(|e| DatabaseError::Query(e.to_string()))?;
-        
-        info!("Created user: {}", user.username);
-        Ok(())
+        match ops.create("users", &surreal_user).await {
+            Ok(_) => {
+                info!("Created user: {}", user.username);
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                if error_msg.contains("duplicate") || error_msg.contains("unique") || error_msg.contains("UNIQUE") {
+                    if error_msg.contains("username") {
+                        Err(DatabaseError::Duplicate)
+                    } else if error_msg.contains("email") {
+                        Err(DatabaseError::Duplicate)
+                    } else {
+                        Err(DatabaseError::Duplicate)
+                    }
+                } else {
+                    Err(DatabaseError::Query(error_msg))
+                }
+            }
+        }
     }
     
     /// 根据ID查找用户

@@ -9,7 +9,7 @@ use std::time::Duration;
 #[ignore] // Requires Docker to be running
 async fn test_real_python_execution() {
     // Create container manager
-    let container_manager = ContainerManager::new().await
+    let container_manager = ContainerManager::new_default()
         .expect("Failed to create container manager");
     
     // Create sandbox manager
@@ -45,7 +45,7 @@ print(f"Result: {result}")
 #[ignore] // Requires Docker to be running
 async fn test_real_nodejs_execution() {
     // Create container manager
-    let container_manager = ContainerManager::new().await
+    let container_manager = ContainerManager::new_default()
         .expect("Failed to create container manager");
     
     // Create sandbox manager
@@ -81,7 +81,7 @@ console.log(`Result: ${result}`);
 #[ignore] // Requires Docker to be running
 async fn test_code_with_error() {
     // Create container manager
-    let container_manager = ContainerManager::new().await
+    let container_manager = ContainerManager::new_default()
         .expect("Failed to create container manager");
     
     // Create sandbox manager
@@ -115,7 +115,7 @@ print("This should not be printed")
 #[ignore] // Requires Docker to be running
 async fn test_resource_limits() {
     // Create container manager
-    let container_manager = ContainerManager::new().await
+    let container_manager = ContainerManager::new_default()
         .expect("Failed to create container manager");
     
     // Create sandbox manager
@@ -125,19 +125,22 @@ async fn test_resource_limits() {
     let resource_limits = ResourceLimits {
         memory: MemoryLimits {
             limit_mb: 64,
-            swap_limit_mb: 0,
+            swap_limit_mb: Some(0),
+            swap_mb: Some(0),
         },
         cpu: CpuLimits {
             cores: 0.5,
-            shares: 512,
+            shares: Some(512),
+            cpu_percent: Some(50.0),
         },
         disk: DiskLimits {
             limit_mb: 100,
-            iops: 100,
+            iops_limit: Some(100),
         },
         network: NetworkLimits {
-            ingress_limit_kbps: 1000,
-            egress_limit_kbps: 1000,
+            upload_bps: Some(1000 * 1024),
+            download_bps: Some(1000 * 1024),
+            max_connections: Some(100),
         },
     };
     
@@ -172,7 +175,7 @@ print("Resource test completed")
 #[ignore] // Requires Docker to be running
 async fn test_timeout() {
     // Create container manager
-    let container_manager = ContainerManager::new().await
+    let container_manager = ContainerManager::new_default()
         .expect("Failed to create container manager");
     
     // Create sandbox manager
@@ -207,7 +210,7 @@ print("This should not be printed due to timeout")
 #[ignore] // Requires Docker to be running
 async fn test_sandbox_isolation() {
     // Create container manager
-    let container_manager = ContainerManager::new().await
+    let container_manager = ContainerManager::new_default()
         .expect("Failed to create container manager");
     
     // Create sandbox manager

@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod integration_tests {
     use super::super::*;
+    use crate::container::resource_limits::{ResourceLimits, CpuLimits, MemoryLimits, DiskLimits, NetworkLimits};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -45,7 +46,7 @@ mod integration_tests {
         assert!(container.stop().await.is_ok(), "Should stop container");
         
         // Remove container
-        assert!(container.destroy().await.is_ok(), "Should remove container");
+        assert!(container.remove().await.is_ok(), "Should remove container");
     }
 
     #[tokio::test]
@@ -83,7 +84,7 @@ mod integration_tests {
         assert!(result.stdout.contains("Hello from Docker!"));
         
         // Cleanup
-        container.destroy().await.expect("Should cleanup");
+        container.remove().await.expect("Should cleanup");
     }
 
     #[tokio::test]
@@ -98,12 +99,25 @@ mod integration_tests {
 
         // Create container with resource limits
         let limits = ResourceLimits {
-            cpu_shares: 256,
-            memory_limit: 128 * 1024 * 1024, // 128MB
-            memory_swap: 256 * 1024 * 1024,  // 256MB
-            cpu_quota: Some(25000),
-            cpu_period: Some(100000),
-            pids_limit: Some(50),
+            cpu: CpuLimits {
+                cores: 0.5,
+                shares: Some(256),
+                cpu_percent: Some(50.0),
+            },
+            memory: MemoryLimits {
+                limit_mb: 128,
+                swap_limit_mb: Some(256),
+                swap_mb: Some(128),
+            },
+            disk: DiskLimits {
+                limit_mb: 1024,
+                iops_limit: Some(500),
+            },
+            network: NetworkLimits {
+                upload_bps: Some(512 * 1024),
+                download_bps: Some(2 * 1024 * 1024),
+                max_connections: Some(50),
+            },
         };
 
         let container = manager
@@ -120,13 +134,13 @@ mod integration_tests {
         container.start().await.expect("Should start");
 
         // Get stats to verify limits are applied
-        let stats = container.get_stats().await.expect("Should get stats");
+        let stats = container.get_resource_stats().await.expect("Should get stats");
         
         // Note: Actual limit verification depends on Docker daemon configuration
         // This test just ensures the stats API works
-        assert!(stats.memory_stats.is_some());
+        assert!(stats.memory_usage_mb > 0);
         
-        container.destroy().await.expect("Should cleanup");
+        container.remove().await.expect("Should cleanup");
     }
 
     #[tokio::test]
@@ -163,13 +177,12 @@ mod integration_tests {
         assert!(result.stdout.contains("4"));
 
         // Get summary
-        let summary = sandbox_mgr
-            .get_sandbox_summary(&sandbox_id)
-            .await
-            .expect("Should get summary");
+        let summaries = sandbox_mgr.list_sandboxes().await;
+        let summary = summaries.iter().find(|s| s.sandbox_id == sandbox_id)
+            .expect("Should find created sandbox");
         
-        assert_eq!(summary.id, sandbox_id);
-        assert_eq!(summary.status, "running");
+        assert_eq!(summary.sandbox_id, sandbox_id);
+        assert_eq!(summary.language, "python");
 
         // Cleanup
         sandbox_mgr

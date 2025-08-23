@@ -4,7 +4,7 @@
 //! supporting both file-based and environment variable configuration.
 
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tokio::fs;
 use tracing::{debug, warn};
 

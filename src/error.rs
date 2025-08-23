@@ -34,6 +34,32 @@ impl Default for SecurityContext {
     }
 }
 
+/// Error recovery strategies
+#[derive(Debug, Clone, PartialEq)]
+pub enum RecoveryStrategy {
+    /// Retry the operation with exponential backoff
+    Retry { max_attempts: u32, backoff_ms: u64 },
+    /// Fallback to an alternative implementation
+    Fallback,
+    /// Recreate the resource (e.g., container, connection)
+    Recreate,
+    /// Graceful degradation (continue with reduced functionality)
+    Degrade,
+    /// Fail fast and propagate the error
+    FailFast,
+    /// Circuit breaker pattern - temporarily stop trying
+    CircuitBreaker { timeout_ms: u64 },
+}
+
+/// Error with recovery metadata
+#[derive(Debug)]
+pub struct RecoverableError {
+    pub error: String, // Store error message instead of full error
+    pub recovery_strategy: RecoveryStrategy,
+    pub retry_count: u32,
+    pub last_attempt: Option<DateTime<Utc>>,
+}
+
 /// Simplified error metadata for essential debugging information
 #[derive(Debug, Clone)]
 pub struct ErrorMetadata {
@@ -831,5 +857,77 @@ impl axum::response::IntoResponse for SoulBoxError {
         });
 
         (status_code, Json(error_response)).into_response()
+    }
+}
+
+impl SoulBoxError {
+    /// Get the recommended recovery strategy for this error
+    pub fn recovery_strategy(&self) -> RecoveryStrategy {
+        match self {
+            // Container errors - usually can be recreated
+            SoulBoxError::Container(_) => RecoveryStrategy::Recreate,
+            
+            // Resource limits - retry with backoff
+            SoulBoxError::MemoryLimitExceeded { .. } | 
+            SoulBoxError::CpuLimitExceeded { .. } |
+            SoulBoxError::ProcessLimitExceeded { .. } => {
+                RecoveryStrategy::Retry { max_attempts: 3, backoff_ms: 1000 }
+            },
+            
+            // Rate limiting - circuit breaker
+            SoulBoxError::RateLimitExceeded { retry_after, .. } => {
+                let timeout_ms = retry_after.num_milliseconds() as u64;
+                RecoveryStrategy::CircuitBreaker { timeout_ms }
+            },
+            
+            // Network errors - retry with backoff
+            SoulBoxError::NetworkConnectionFailed { .. } |
+            SoulBoxError::DnsResolutionFailed { .. } => {
+                RecoveryStrategy::Retry { max_attempts: 5, backoff_ms: 500 }
+            },
+            
+            // File system errors - depends on the specific error
+            SoulBoxError::FileNotFound { .. } => RecoveryStrategy::FailFast,
+            SoulBoxError::FilePermissionDenied { .. } => RecoveryStrategy::FailFast,
+            SoulBoxError::DiskSpaceInsufficient { .. } => RecoveryStrategy::Degrade,
+            
+            // Security errors - fail fast
+            SoulBoxError::SecurityViolation { .. } |
+            SoulBoxError::Authentication { .. } |
+            SoulBoxError::MaliciousCodeDetected { .. } => RecoveryStrategy::FailFast,
+            
+            // Configuration errors - usually require manual intervention
+            SoulBoxError::Configuration { .. } => RecoveryStrategy::FailFast,
+            
+            // Pool errors - try recreation
+            SoulBoxError::PoolError(_) => RecoveryStrategy::Recreate,
+            
+            // Database errors - retry with backoff
+            SoulBoxError::Database(_) => RecoveryStrategy::Retry { max_attempts: 3, backoff_ms: 2000 },
+            
+            // Default to retry for other errors
+            _ => RecoveryStrategy::Retry { max_attempts: 2, backoff_ms: 1000 },
+        }
+    }
+    
+    /// Check if this error is retryable
+    pub fn is_retryable(&self) -> bool {
+        !matches!(self.recovery_strategy(), RecoveryStrategy::FailFast)
+    }
+    
+    /// Get error severity for logging and monitoring
+    pub fn severity(&self) -> SecuritySeverity {
+        match self {
+            SoulBoxError::SecurityViolation { context, .. } => context.severity.clone(),
+            SoulBoxError::Authentication { security_context, .. } => security_context.severity.clone(),
+            SoulBoxError::MaliciousCodeDetected { .. } => SecuritySeverity::Critical,
+            SoulBoxError::ValidationError { security_context: Some(ctx), .. } => ctx.severity.clone(),
+            SoulBoxError::RateLimitExceeded { .. } => SecuritySeverity::Medium,
+            SoulBoxError::ResourceExhausted { .. } => SecuritySeverity::High,
+            SoulBoxError::Container(_) => SecuritySeverity::Medium,
+            SoulBoxError::Database(_) => SecuritySeverity::High,
+            SoulBoxError::Internal(_) => SecuritySeverity::High,
+            _ => SecuritySeverity::Low,
+        }
     }
 }

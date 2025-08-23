@@ -5,7 +5,7 @@
 
 use crate::billing::{BillingService, models::*};
 use crate::billing::models::{MetricType, InvoiceStatus, PricingTier};
-use crate::auth::middleware::{AuthContext, AuthExtractor};
+use crate::auth::middleware::AuthExtractor;
 use crate::error::{SoulBoxError, Result};
 use axum::{
     extract::{Path, Query, State},

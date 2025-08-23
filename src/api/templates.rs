@@ -1,7 +1,7 @@
 use crate::auth::middleware::AuthExtractor;
 use crate::auth::models::Permission;
 use crate::template::{
-    TemplateManager, TemplateError,
+    TemplateManager,
     models::{CreateTemplateRequest, UpdateTemplateRequest},
 };
 use crate::database::{SurrealPool, TemplateRepository};

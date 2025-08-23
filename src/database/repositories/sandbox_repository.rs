@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{info, error, debug};
+use tracing::{info, debug};
 use uuid::Uuid;
 
 use crate::database::surrealdb::{
@@ -391,6 +391,36 @@ impl SandboxRepository {
             .map_err(|e| DatabaseError::Query(format!("解析统计结果失败: {}", e)))?;
         
         Ok(count.unwrap_or(0))
+    }
+    
+    /// 清理过期的沙盒
+    pub async fn cleanup_expired_sandboxes(&self) -> DatabaseResult<i64> {
+        debug!("清理过期的沙盒");
+        
+        let conn = self.pool.get_connection().await
+            .map_err(|e| DatabaseError::Connection(e.to_string()))?;
+        
+        // 删除已过期的沙盒
+        let sql = "DELETE FROM sandboxes WHERE expires_at IS NOT NONE AND expires_at < time::now() RETURN count()";
+        
+        let mut response = conn.db()
+            .query(sql)
+            .await
+            .map_err(|e| DatabaseError::Query(format!("清理过期沙盒失败: {}", e)))?;
+        
+        let result: Vec<serde_json::Value> = response
+            .take(0usize)
+            .map_err(|e| DatabaseError::Query(format!("解析清理结果失败: {}", e)))?;
+        
+        let count = result.first()
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as i64;
+        
+        if count > 0 {
+            info!("清理了 {} 个过期沙盒", count);
+        }
+        
+        Ok(count)
     }
     
     /// 将 SurrealSandbox 转换为 DbSandbox

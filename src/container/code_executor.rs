@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::container::sandbox::SandboxContainer;
 use std::sync::Arc;
-use tracing::{info, error, debug};
+use tracing::{info, error};
 use std::time::Duration;
 use base64::{Engine as _, engine::general_purpose};
 

@@ -1,5 +1,5 @@
-use anyhow::{Result, Context};
-use chrono::{DateTime, Duration, Utc};
+use anyhow::Result;
+use chrono::{DateTime, Utc};
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -7,7 +7,6 @@ use uuid::Uuid;
 use tracing::{info, warn, error};
 
 pub use super::models::{ApiKey, Permission};
-use crate::error::SoulBoxError;
 
 /// 数据库API密钥操作trait，确保正确的数据库验证
 #[async_trait::async_trait]
@@ -317,7 +316,7 @@ mod tests {
         let manager = ApiKeyManager::new("sk".to_string());
         let user_id = Uuid::new_v4();
         let permissions = ApiKeyTemplate::readonly_permissions();
-        let expired_time = Utc::now() - Duration::hours(1); // 1小时前过期
+        let expired_time = Utc::now() - chrono::Duration::hours(1); // 1小时前过期
         
         let (api_key, full_key) = manager.generate_api_key(
             "Expired Key".to_string(),

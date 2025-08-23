@@ -1,13 +1,13 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{info, error, debug};
+use tracing::{info, debug};
 use uuid::Uuid;
 
-use crate::audit::models::{AuditLog, AuditEventType, AuditSeverity, AuditResult};
+use crate::audit::models::{AuditLog, AuditEventType};
 use crate::database::surrealdb::{
     SurrealPool, SurrealOperations, 
-    uuid_to_record_id, record_id_to_uuid, SurrealResult, SurrealConnectionError, PaginationResult
+    uuid_to_record_id
 };
 use crate::database::{DatabaseError, DatabaseResult, models::{DbAuditLog, PaginatedResult}};
 

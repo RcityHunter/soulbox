@@ -92,7 +92,7 @@ impl JwtManager {
     
     /// 验证JWT密钥强度
     fn validate_secret_strength(secret: &str) -> Result<()> {
-        use sha2::{Sha256, Digest};
+        use sha2::Digest;
         
         // 最小长度要求
         if secret.len() < 32 {

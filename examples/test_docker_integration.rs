@@ -1,4 +1,5 @@
-use soulbox::container::{ContainerManager, CodeExecutor, ResourceLimits, NetworkConfig};
+use soulbox::container::{ContainerManager, CodeExecutor, NetworkConfig};
+use soulbox::container::resource_limits::{ResourceLimits, CpuLimits, MemoryLimits, DiskLimits, NetworkLimits};
 use soulbox::sandbox_manager::SandboxManager;
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,12 +25,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a Python sandbox
     println!("3. Creating Python sandbox...");
     let resource_limits = ResourceLimits {
-        cpu_shares: 512,
-        memory_limit: 256 * 1024 * 1024, // 256MB
-        memory_swap: 512 * 1024 * 1024,  // 512MB
-        cpu_quota: Some(50000),
-        cpu_period: Some(100000),
-        pids_limit: Some(100),
+        cpu: CpuLimits {
+            cores: 0.5,
+            shares: Some(512),
+            cpu_percent: Some(50.0),
+        },
+        memory: MemoryLimits {
+            limit_mb: 256,
+            swap_limit_mb: Some(512),
+            swap_mb: Some(256),
+        },
+        disk: DiskLimits {
+            limit_mb: 1024,
+            iops_limit: Some(1000),
+        },
+        network: NetworkLimits {
+            upload_bps: Some(1024 * 1024),
+            download_bps: Some(2 * 1024 * 1024),
+            max_connections: Some(100),
+        },
     };
 
     let sandbox_id = sandbox_manager

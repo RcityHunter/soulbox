@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use crate::error::{Result, SoulBoxError};
 use bollard::container::Config;
-use super::{RuntimeConfig, RuntimeType, ExecutionContext, ExecutionFile};
+use super::{RuntimeConfig, RuntimeType, ExecutionContext};
 
 /// Node.js-specific runtime configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

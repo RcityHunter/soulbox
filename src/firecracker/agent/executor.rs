@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
-use tracing::{info, warn, error, debug};
+use tracing::error;
 
 use super::protocol::{
     ExecutionRequest, ExecutionResponse, ExecutionStatus, 

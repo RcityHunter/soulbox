@@ -1,7 +1,6 @@
-use redis::{AsyncCommands, Client, RedisError};
+use redis::{AsyncCommands, Client};
 use redis::aio::MultiplexedConnection;
 use serde_json;
-use std::collections::HashMap;
 use uuid::Uuid;
 use tracing::{error, info, warn};
 use crate::error::{Result, SoulBoxError};

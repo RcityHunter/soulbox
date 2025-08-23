@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tokio::fs;
-use tracing::{info, error};
+use tracing::info;
 use crate::error::Result;
 
 /// Storage manager for Firecracker VM disk images

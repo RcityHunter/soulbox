@@ -2,7 +2,7 @@ use crate::template::{
     models::{Template, CreateTemplateRequest, UpdateTemplateRequest},
     TemplateError,
 };
-use crate::database::{TemplateRepository, DatabaseResult};
+use crate::database::TemplateRepository;
 use crate::error::Result as SoulBoxResult;
 use std::collections::HashMap;
 use std::sync::Arc;

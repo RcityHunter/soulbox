@@ -10,7 +10,7 @@ pub use storage::TemplateStorage;
 pub use file_storage::TemplateFileStorage;
 pub use dockerfile::{DockerfileParser, DockerImageBuilder};
 
-use crate::error::{Result as SoulBoxResult, SoulBoxError};
+use crate::error::SoulBoxError;
 
 /// Template system errors
 #[derive(Debug, thiserror::Error)]

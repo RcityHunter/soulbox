@@ -6,7 +6,7 @@ use std::pin::Pin;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use super::connection::{SurrealConnection, SurrealResult, SurrealConnectionError};
+use super::connection::{SurrealConnection, SurrealResult};
 use super::operations::uuid_to_record_id;
 
 /// Real-time event types

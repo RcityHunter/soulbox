@@ -169,7 +169,7 @@ impl ContainerManager {
             .collect();
         
         // Create host configuration with comprehensive resource limits
-        let mut host_config = HostConfig {
+        let host_config = HostConfig {
             // Memory limits
             memory: Some(resource_limits.memory.limit_mb as i64 * 1024 * 1024), // Convert MB to bytes
             memory_swap: resource_limits.memory.swap_limit_mb.map(|swap| swap as i64 * 1024 * 1024),
@@ -511,6 +511,98 @@ impl ContainerManager {
             Ok(false)
         }
     }
+
+    /// Pause a container
+    pub async fn pause_container(&self, sandbox_id: &str) -> Result<bool> {
+        let containers = self.containers.read().await;
+        if let Some(container) = containers.get(sandbox_id) {
+            container.pause().await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Resume a paused container
+    pub async fn resume_container(&self, sandbox_id: &str) -> Result<bool> {
+        let containers = self.containers.read().await;
+        if let Some(container) = containers.get(sandbox_id) {
+            container.resume().await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Restart a container
+    pub async fn restart_container(&self, sandbox_id: &str) -> Result<bool> {
+        let containers = self.containers.read().await;
+        if let Some(container) = containers.get(sandbox_id) {
+            container.restart().await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Kill a container with optional signal
+    pub async fn kill_container(&self, sandbox_id: &str, signal: Option<&str>) -> Result<bool> {
+        let containers = self.containers.read().await;
+        if let Some(container) = containers.get(sandbox_id) {
+            container.kill(signal).await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Get comprehensive container health information
+    pub async fn get_container_health(&self, sandbox_id: &str) -> Option<ContainerHealth> {
+        let containers = self.containers.read().await;
+        if let Some(container) = containers.get(sandbox_id) {
+            let status = container.get_status().await.unwrap_or_else(|_| "unknown".to_string());
+            let health_check = container.health_check().await.unwrap_or(false);
+            let resource_stats = container.get_resource_stats().await.ok();
+            let task_stats = container.get_task_stats().await;
+            
+            Some(ContainerHealth {
+                container_id: container.get_container_id().to_string(),
+                sandbox_id: sandbox_id.to_string(),
+                status,
+                healthy: health_check,
+                resource_stats,
+                task_stats,
+                cleaned_up: container.is_cleaned_up(),
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Get all containers health status for monitoring
+    pub async fn get_all_containers_health(&self) -> HashMap<String, ContainerHealth> {
+        let containers = self.containers.read().await;
+        let mut health_map = HashMap::new();
+        
+        for (sandbox_id, container) in containers.iter() {
+            let status = container.get_status().await.unwrap_or_else(|_| "unknown".to_string());
+            let health_check = container.health_check().await.unwrap_or(false);
+            let resource_stats = container.get_resource_stats().await.ok();
+            let task_stats = container.get_task_stats().await;
+            
+            health_map.insert(sandbox_id.clone(), ContainerHealth {
+                container_id: container.get_container_id().to_string(),
+                sandbox_id: sandbox_id.to_string(),
+                status,
+                healthy: health_check,
+                resource_stats,
+                task_stats,
+                cleaned_up: container.is_cleaned_up(),
+            });
+        }
+        
+        health_map
+    }
     
     /// Apply network bandwidth limits to a container using tc (traffic control)
     /// Note: This requires the host to have tc installed and proper permissions
@@ -620,15 +712,28 @@ impl ContainerManager {
             warn!("Timeout waiting for operations to complete during shutdown");
         }
         
-        // Clean up all containers
+        // Clean up all containers in parallel for faster shutdown
         let containers = {
             let containers_guard = self.containers.read().await;
             containers_guard.keys().cloned().collect::<Vec<_>>()
         };
         
+        let mut cleanup_tasks = Vec::new();
         for sandbox_id in containers {
-            if let Err(e) = self.remove_container(&sandbox_id).await {
-                error!("Failed to remove container {} during shutdown: {}", sandbox_id, e);
+            let manager = self.clone(); // Clone self to move into task
+            let sandbox_id = sandbox_id.clone();
+            let task = tokio::spawn(async move {
+                if let Err(e) = manager.remove_container(&sandbox_id).await {
+                    error!("Failed to remove container {} during shutdown: {}", sandbox_id, e);
+                }
+            });
+            cleanup_tasks.push(task);
+        }
+        
+        // Wait for all cleanup tasks to complete
+        for task in cleanup_tasks {
+            if let Err(e) = task.await {
+                error!("Cleanup task failed during shutdown: {}", e);
             }
         }
         
@@ -637,6 +742,72 @@ impl ContainerManager {
         
         info!("Container manager shutdown completed");
         Ok(())
+    }
+
+    /// Perform bulk operations on multiple containers
+    pub async fn bulk_operation<F, R>(&self, sandbox_ids: Vec<String>, operation: F) -> HashMap<String, Result<R>>
+    where
+        F: Fn(Arc<SandboxContainer>) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<R>> + Send>> + Send + Sync + 'static + Clone,
+        R: Send + 'static,
+    {
+        let mut results = HashMap::new();
+        let containers = self.containers.read().await;
+        let mut tasks = Vec::new();
+        
+        for sandbox_id in sandbox_ids {
+            if let Some(container) = containers.get(&sandbox_id) {
+                let container = container.clone();
+                let operation = operation.clone();
+                let sandbox_id_clone = sandbox_id.clone();
+                
+                let task = tokio::spawn(async move {
+                    (sandbox_id_clone, operation(container).await)
+                });
+                tasks.push(task);
+            } else {
+                results.insert(sandbox_id, Err(crate::error::SoulBoxError::internal("Container not found".to_string())));
+            }
+        }
+        
+        for task in tasks {
+            if let Ok((sandbox_id, result)) = task.await {
+                results.insert(sandbox_id, result);
+            }
+        }
+        
+        results
+    }
+
+    /// Perform health checks on all containers and return unhealthy ones
+    pub async fn detect_unhealthy_containers(&self) -> Vec<String> {
+        let containers = self.containers.read().await;
+        let mut unhealthy = Vec::new();
+        let mut health_tasks = Vec::new();
+        
+        for (sandbox_id, container) in containers.iter() {
+            let container = container.clone();
+            let sandbox_id = sandbox_id.clone();
+            
+            let task = tokio::spawn(async move {
+                let healthy = container.health_check().await.unwrap_or(false);
+                (sandbox_id, healthy)
+            });
+            health_tasks.push(task);
+        }
+        
+        for task in health_tasks {
+            if let Ok((sandbox_id, healthy)) = task.await {
+                if !healthy {
+                    unhealthy.push(sandbox_id);
+                }
+            }
+        }
+        
+        if !unhealthy.is_empty() {
+            warn!("Detected {} unhealthy containers: {:?}", unhealthy.len(), unhealthy);
+        }
+        
+        unhealthy
     }
 
     /// Get resource usage statistics
@@ -709,13 +880,6 @@ impl ContainerManager {
         Ok(self.docker.inspect_container(container_id, None).await?)
     }
 
-    /// Restart a container
-    pub async fn restart_container(&self, container_id: &str) -> Result<()> {
-        self.docker
-            .restart_container(container_id, None::<bollard::container::RestartContainerOptions>)
-            .await?;
-        Ok(())
-    }
 
     /// Get container statistics
     pub async fn get_container_stats(&self, container_id: &str) -> Result<bollard::container::Stats> {
@@ -758,6 +922,17 @@ pub struct ContainerInfo {
     pub sandbox_id: String,
     pub status: String,
     pub image: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContainerHealth {
+    pub container_id: String,
+    pub sandbox_id: String,
+    pub status: String,
+    pub healthy: bool,
+    pub resource_stats: Option<crate::container::sandbox::ResourceStats>,
+    pub task_stats: crate::container::sandbox::TaskStats,
+    pub cleaned_up: bool,
 }
 
 /// Resource tracker for monitoring and preventing memory leaks
