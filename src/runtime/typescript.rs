@@ -1,7 +1,5 @@
 //! TypeScript runtime implementation using Deno
 
-use crate::error::Result;
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 /// TypeScript runtime configuration

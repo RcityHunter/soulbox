@@ -1,8 +1,5 @@
 //! Ruby runtime implementation
 
-use crate::error::Result;
-use std::collections::HashMap;
-
 /// Ruby runtime configuration
 pub struct RubyRuntime {
     version: String,

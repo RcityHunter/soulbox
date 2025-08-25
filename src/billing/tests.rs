@@ -209,7 +209,7 @@ fn test_billing_config_creation() {
     let config = BillingConfig::default();
     
     assert_eq!(config.storage_config.redis_url, "redis://localhost:6379");
-    assert_eq!(config.metrics_stream, "billing:metrics");
+    assert_eq!(config.metrics_stream, "soulbox:metrics");
     // consumer_group is not a field in BillingConfig
     assert_eq!(config.batch_size, 100);
     assert_eq!(config.collection_interval, 30);

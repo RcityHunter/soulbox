@@ -1,8 +1,5 @@
 //! PHP runtime implementation
 
-use crate::error::Result;
-use std::collections::HashMap;
-
 /// PHP runtime configuration
 pub struct PHPRuntime {
     version: String,

@@ -131,3 +131,7 @@ harness = false
 [[bench]]
 name = "simple_performance"
 harness = false
+
+[[bench]]
+name = "container_benchmark"
+harness = false
