@@ -260,10 +260,25 @@ mod tests {
         let hot_reload_manager = Arc::new(HotReloadManager::new(config).unwrap());
         
         // Create a mock container for testing
+        use crate::container::resource_limits::ResourceLimits;
+        use crate::container::network::NetworkConfig;
+        use bollard::Docker;
+        use std::collections::HashMap;
+        
+        let docker = Arc::new(Docker::connect_with_local_defaults().unwrap());
+        let resource_limits = ResourceLimits::default();
+        let network_config = NetworkConfig::default();
+        let env_vars = HashMap::new();
+        
         let mock_container = Arc::new(SandboxContainer::new(
-            "test-container".to_string(),
-            "test-image".to_string(),
-        ));
+            "test-container",
+            "test-container-id", 
+            "test-image",
+            resource_limits,
+            network_config,
+            env_vars,
+            docker,
+        ).unwrap());
         let code_executor = Arc::new(CodeExecutor::new(mock_container));
         
         let api_handler = HotReloadApiHandler::new(hot_reload_manager, code_executor);

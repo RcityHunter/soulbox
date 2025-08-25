@@ -1,7 +1,6 @@
 //! Extended runtime support for additional programming languages
 
 use crate::runtime::{RuntimeType, RuntimeConfig};
-use crate::error::Result;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 

@@ -532,7 +532,7 @@ impl TemplateRepository {
 mod tests {
     use super::*;
     use crate::database::surrealdb::SurrealConfig;
-    use crate::template::models::RuntimeType;
+    use crate::runtime::RuntimeType;
 
     async fn setup_test_db() -> Arc<SurrealPool> {
         let config = SurrealConfig::memory();

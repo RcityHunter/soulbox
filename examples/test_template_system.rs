@@ -1,7 +1,8 @@
 use soulbox::container::ContainerManager;
 use soulbox::sandbox_manager::SandboxManager;
 use soulbox::template::{TemplateManager, DockerfileParser};
-use soulbox::template::models::{Template, TemplateMetadata, RuntimeType, TemplateVersion, TemplateFile};
+use soulbox::template::models::{Template, TemplateMetadata, TemplateVersion, TemplateFile};
+use soulbox::runtime::RuntimeType;
 use soulbox::container::resource_limits::ResourceLimits;
 use std::sync::Arc;
 use std::time::Duration;
