@@ -5,10 +5,12 @@ use tokio_tungstenite::accept_async;
 use tracing::{info, error};
 
 use super::handler::WebSocketHandler;
+use super::pty::PtyWebSocketHandler;
 use crate::error::Result;
 
 pub struct WebSocketServer {
     handler: Arc<WebSocketHandler>,
+    pty_handler: Arc<PtyWebSocketHandler>,
 }
 
 impl Default for WebSocketServer {
@@ -21,6 +23,7 @@ impl WebSocketServer {
     pub fn new() -> Self {
         Self {
             handler: Arc::new(WebSocketHandler::new()),
+            pty_handler: Arc::new(PtyWebSocketHandler::new()),
         }
     }
 
@@ -73,6 +76,19 @@ impl WebSocketServer {
 
     pub async fn get_authenticated_session_count(&self) -> usize {
         self.handler.get_authenticated_session_count().await
+    }
+
+    /// Handle PTY terminal WebSocket connection
+    pub async fn handle_pty_connection(&self, stream: TcpStream) -> Result<()> {
+        let ws_stream = accept_async(stream).await?;
+        info!("PTY WebSocket connection established");
+        self.pty_handler.handle_connection(ws_stream).await;
+        Ok(())
+    }
+
+    /// Get active PTY session count
+    pub async fn get_active_pty_session_count(&self) -> usize {
+        self.pty_handler.list_sessions().await.len()
     }
 
     // Helper method to create a test WebSocket server on a random port

@@ -10,6 +10,7 @@ pub mod extended;
 pub mod ruby;
 pub mod php;
 pub mod typescript;
+pub mod hot_reload;
 
 /// Supported runtime types
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -553,3 +554,9 @@ mod tests {
         assert_eq!(command, "python script.py");
     }
 }
+
+// Hot reload exports
+pub use hot_reload::{
+    HotReloadManager, HotReloadConfig, HotReloadStats,
+    FileChangeEvent, FileChangeType,
+};

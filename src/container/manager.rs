@@ -4,7 +4,7 @@ use tokio::sync::{RwLock, Mutex, Semaphore};
 use bollard::Docker;
 use bollard::container::{Config as ContainerConfig, CreateContainerOptions};
 use bollard::models::HostConfig;
-use tracing::{info, error, warn};
+use tracing::{info, error, warn, debug};
 use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use tokio::time::{timeout, Duration as TokioDuration};
 
@@ -830,6 +830,38 @@ impl ContainerManager {
             .await?;
 
         Ok(create_result.id)
+    }
+
+    /// Pull a Docker image
+    pub async fn pull_image(&self, image: &str) -> Result<()> {
+        use bollard::image::CreateImageOptions;
+        use futures_util::StreamExt;
+
+        info!("Pulling image: {}", image);
+        
+        let options = Some(CreateImageOptions {
+            from_image: image,
+            ..Default::default()
+        });
+
+        let mut stream = self.docker.create_image(options, None, None);
+        
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(output) => {
+                    if let Some(status) = output.status {
+                        debug!("Image pull progress: {}", status);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to pull image {}: {}", image, e);
+                    return Err(SoulBoxError::Container(e));
+                }
+            }
+        }
+
+        info!("Successfully pulled image: {}", image);
+        Ok(())
     }
 
     /// Start a container by ID
