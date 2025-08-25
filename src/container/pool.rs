@@ -253,6 +253,8 @@ pub struct RuntimeStats {
     pub containers_available: usize,
     /// Containers currently in use
     pub containers_in_use: usize,
+    /// Average wait time for container allocation
+    pub avg_wait_time: Duration,
 }
 
 /// Runtime usage pattern for optimization
@@ -357,6 +359,27 @@ pub struct ContainerPool {
     /// Channel for async container warming
     warming_tx: mpsc::Sender<WarmingRequest>,
     warming_rx: Arc<RwLock<mpsc::Receiver<WarmingRequest>>>,
+}
+
+impl Clone for ContainerPool {
+    fn clone(&self) -> Self {
+        // Create new channels for the cloned pool
+        let (warming_tx, warming_rx) = mpsc::channel(100);
+        
+        Self {
+            config: self.config.clone(),
+            container_manager: self.container_manager.clone(),
+            hot_pools: self.hot_pools.clone(),
+            warm_pools: self.warm_pools.clone(),
+            cold_pools: self.cold_pools.clone(),
+            semaphores: self.semaphores.clone(),
+            maintenance_task: None, // Don't clone the maintenance task
+            stats: self.stats.clone(),
+            predictor: self.predictor.clone(),
+            warming_tx,
+            warming_rx: Arc::new(RwLock::new(warming_rx)),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -742,9 +765,12 @@ impl ContainerPool {
         info!("Pre-warming containers...");
 
         let mut prewarming_tasks = Vec::new();
+        
+        // Clone the runtime configs to avoid lifetime issues
+        let runtime_configs = self.config.runtime_configs.clone();
 
-        for (runtime, runtime_config) in &self.config.runtime_configs {
-            let runtime = runtime.clone();
+        for (runtime, runtime_config) in runtime_configs {
+            let runtime_for_task = runtime.clone();  // Clone for use inside the task
             let pool = self.clone();
             let min_containers = runtime_config.min_containers;
             
@@ -752,23 +778,23 @@ impl ContainerPool {
                 let mut successful_containers = 0;
                 
                 for i in 0..min_containers {
-                    match pool.create_new_container(&runtime).await {
+                    match pool.create_new_container(&runtime_for_task).await {
                         Ok(container_id) => {
                             // Add to pool
-                            if let Err(e) = pool.return_container(container_id.clone(), runtime.clone()).await {
+                            if let Err(e) = pool.return_container(container_id.clone(), runtime_for_task.clone()).await {
                                 error!("Failed to add pre-warmed container {} to pool: {}", container_id, e);
                             } else {
                                 successful_containers += 1;
-                                debug!("Pre-warmed container {}/{} for runtime {:?}", i + 1, min_containers, runtime);
+                                debug!("Pre-warmed container {}/{} for runtime {:?}", i + 1, min_containers, runtime_for_task);
                             }
                         }
                         Err(e) => {
-                            warn!("Failed to pre-warm container {}/{} for runtime {:?}: {}", i + 1, min_containers, runtime, e);
+                            warn!("Failed to pre-warm container {}/{} for runtime {:?}: {}", i + 1, min_containers, runtime_for_task, e);
                         }
                     }
                 }
                 
-                info!("Pre-warmed {}/{} containers for runtime {:?}", successful_containers, min_containers, runtime);
+                info!("Pre-warmed {}/{} containers for runtime {:?}", successful_containers, min_containers, runtime_for_task);
                 successful_containers
             });
             

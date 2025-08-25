@@ -569,20 +569,6 @@ impl SoulBoxError {
         }
     }
     
-    /// Get error severity for monitoring and alerting
-    pub fn severity(&self) -> SecuritySeverity {
-        match self {
-            Self::SecurityViolation { context, .. } => context.severity.clone(),
-            Self::Authentication { .. } => SecuritySeverity::High,
-            Self::Authorization { .. } => SecuritySeverity::Medium,
-            Self::ValidationError { .. } => SecuritySeverity::Low,
-            Self::RateLimitExceeded { .. } => SecuritySeverity::Medium,
-            Self::ResourceExhausted { .. } => SecuritySeverity::High,
-            Self::ContainerCreationFailed { .. } => SecuritySeverity::Medium,
-            _ => SecuritySeverity::Low,
-        }
-    }
-    
     /// Check if error should trigger security alerts
     pub fn requires_security_alert(&self) -> bool {
         matches!(self.severity(), SecuritySeverity::High | SecuritySeverity::Critical)

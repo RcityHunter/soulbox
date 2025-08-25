@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::str::FromStr;
 use crate::error::{Result, SoulBoxError};
 
 pub mod python;
@@ -31,7 +32,7 @@ impl RuntimeType {
     }
 
     /// Parse runtime type from string
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn from_str_opt(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "python" | "py" => Some(RuntimeType::Python),
             "nodejs" | "node" | "javascript" | "js" => Some(RuntimeType::NodeJS),
@@ -41,6 +42,21 @@ impl RuntimeType {
             "shell" | "bash" | "sh" => Some(RuntimeType::Shell),
             _ => None,
         }
+    }
+}
+
+impl FromStr for RuntimeType {
+    type Err = SoulBoxError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Self::from_str_opt(s).ok_or_else(|| {
+            SoulBoxError::ValidationError {
+                field: "runtime_type".to_string(),
+                reason: format!("Unknown runtime type: '{}'. Expected one of: python, nodejs, rust, go, java, shell", s),
+                provided_value: Some(s.to_string()),
+                security_context: None,
+            }
+        })
     }
 }
 
