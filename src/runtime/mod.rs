@@ -6,9 +6,14 @@ use crate::error::{Result, SoulBoxError};
 pub mod python;
 pub mod nodejs;
 pub mod detector;
+pub mod extended;
+pub mod ruby;
+pub mod php;
+pub mod typescript;
 
 /// Supported runtime types
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RuntimeType {
     Python,
     NodeJS,
@@ -16,6 +21,15 @@ pub enum RuntimeType {
     Go,
     Java,
     Shell,
+    Ruby,
+    PHP,
+    TypeScript,
+    Cpp,
+    C,
+    R,
+    Julia,
+    Kotlin,
+    Swift,
 }
 
 impl RuntimeType {
@@ -28,6 +42,15 @@ impl RuntimeType {
             RuntimeType::Go => "go",
             RuntimeType::Java => "java",
             RuntimeType::Shell => "shell",
+            RuntimeType::Ruby => "ruby",
+            RuntimeType::PHP => "php",
+            RuntimeType::TypeScript => "typescript",
+            RuntimeType::Cpp => "cpp",
+            RuntimeType::C => "c",
+            RuntimeType::R => "r",
+            RuntimeType::Julia => "julia",
+            RuntimeType::Kotlin => "kotlin",
+            RuntimeType::Swift => "swift",
         }
     }
 
@@ -40,6 +63,15 @@ impl RuntimeType {
             "go" | "golang" => Some(RuntimeType::Go),
             "java" => Some(RuntimeType::Java),
             "shell" | "bash" | "sh" => Some(RuntimeType::Shell),
+            "ruby" | "rb" => Some(RuntimeType::Ruby),
+            "php" => Some(RuntimeType::PHP),
+            "typescript" | "ts" => Some(RuntimeType::TypeScript),
+            "cpp" | "c++" | "cxx" => Some(RuntimeType::Cpp),
+            "c" => Some(RuntimeType::C),
+            "r" => Some(RuntimeType::R),
+            "julia" | "jl" => Some(RuntimeType::Julia),
+            "kotlin" | "kt" => Some(RuntimeType::Kotlin),
+            "swift" => Some(RuntimeType::Swift),
             _ => None,
         }
     }
@@ -57,6 +89,12 @@ impl FromStr for RuntimeType {
                 security_context: None,
             }
         })
+    }
+}
+
+impl std::fmt::Display for RuntimeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -104,7 +142,7 @@ impl RuntimeConfig {
                 HashMap::new(),
                 vec!["npm install".to_string()],
                 "node {file}".to_string(),
-                vec!["js".to_string(), "mjs".to_string(), "ts".to_string()],
+                vec!["js".to_string(), "mjs".to_string()],
             ),
             RuntimeType::Rust => (
                 "rust:1.75-slim".to_string(),
@@ -137,6 +175,78 @@ impl RuntimeConfig {
                 vec![],
                 "bash {file}".to_string(),
                 vec!["sh".to_string(), "bash".to_string()],
+            ),
+            RuntimeType::Ruby => (
+                format!("ruby:{}-slim", version),
+                "/workspace".to_string(),
+                HashMap::new(),
+                vec!["gem install bundler".to_string()],
+                "ruby {file}".to_string(),
+                vec!["rb".to_string()],
+            ),
+            RuntimeType::PHP => (
+                format!("php:{}-cli", version),
+                "/workspace".to_string(),
+                HashMap::new(),
+                vec!["apt-get update && apt-get install -y zip unzip".to_string()],
+                "php {file}".to_string(),
+                vec!["php".to_string()],
+            ),
+            RuntimeType::TypeScript => (
+                "denoland/deno:latest".to_string(),
+                "/workspace".to_string(),
+                HashMap::new(),
+                vec![],
+                "deno run --allow-all {file}".to_string(),
+                vec!["ts".to_string(), "tsx".to_string()],
+            ),
+            RuntimeType::Cpp => (
+                "gcc:latest".to_string(),
+                "/workspace".to_string(),
+                HashMap::new(),
+                vec![],
+                "g++ -o /tmp/a.out {file} && /tmp/a.out".to_string(),
+                vec!["cpp".to_string(), "cc".to_string(), "cxx".to_string()],
+            ),
+            RuntimeType::C => (
+                "gcc:latest".to_string(),
+                "/workspace".to_string(),
+                HashMap::new(),
+                vec![],
+                "gcc -o /tmp/a.out {file} && /tmp/a.out".to_string(),
+                vec!["c".to_string()],
+            ),
+            RuntimeType::R => (
+                format!("r-base:{}", version),
+                "/workspace".to_string(),
+                HashMap::new(),
+                vec![],
+                "Rscript {file}".to_string(),
+                vec!["r".to_string(), "R".to_string()],
+            ),
+            RuntimeType::Julia => (
+                format!("julia:{}", version),
+                "/workspace".to_string(),
+                HashMap::new(),
+                vec![],
+                "julia {file}".to_string(),
+                vec!["jl".to_string()],
+            ),
+            RuntimeType::Kotlin => (
+                "zenika/kotlin:latest".to_string(),
+                "/workspace".to_string(),
+                HashMap::new(),
+                vec![],
+                "kotlinc {file} -include-runtime -d /tmp/app.jar && java -jar /tmp/app.jar".to_string(),
+                vec!["kt".to_string(), "kts".to_string()],
+            ),
+            RuntimeType::Swift => (
+                "swift:latest".to_string(),
+                "/workspace".to_string(),
+                HashMap::new(),
+                vec![],
+                "swift {file}".to_string(),
+                vec!["swift".to_string()],
             ),
         };
 
@@ -203,6 +313,42 @@ impl RuntimeManager {
         // Add default Shell runtime
         let shell_config = RuntimeConfig::new(RuntimeType::Shell, "latest".to_string());
         runtimes.insert("shell".to_string(), shell_config);
+        
+        // Add Ruby runtime
+        let ruby_config = RuntimeConfig::new(RuntimeType::Ruby, "3.2".to_string());
+        runtimes.insert("ruby".to_string(), ruby_config);
+        
+        // Add PHP runtime
+        let php_config = RuntimeConfig::new(RuntimeType::PHP, "8.2".to_string());
+        runtimes.insert("php".to_string(), php_config);
+        
+        // Add TypeScript runtime
+        let typescript_config = RuntimeConfig::new(RuntimeType::TypeScript, "latest".to_string());
+        runtimes.insert("typescript".to_string(), typescript_config);
+        
+        // Add C++ runtime
+        let cpp_config = RuntimeConfig::new(RuntimeType::Cpp, "latest".to_string());
+        runtimes.insert("cpp".to_string(), cpp_config);
+        
+        // Add C runtime
+        let c_config = RuntimeConfig::new(RuntimeType::C, "latest".to_string());
+        runtimes.insert("c".to_string(), c_config);
+        
+        // Add R runtime
+        let r_config = RuntimeConfig::new(RuntimeType::R, "latest".to_string());
+        runtimes.insert("r".to_string(), r_config);
+        
+        // Add Julia runtime
+        let julia_config = RuntimeConfig::new(RuntimeType::Julia, "1.9".to_string());
+        runtimes.insert("julia".to_string(), julia_config);
+        
+        // Add Kotlin runtime
+        let kotlin_config = RuntimeConfig::new(RuntimeType::Kotlin, "latest".to_string());
+        runtimes.insert("kotlin".to_string(), kotlin_config);
+        
+        // Add Swift runtime
+        let swift_config = RuntimeConfig::new(RuntimeType::Swift, "latest".to_string());
+        runtimes.insert("swift".to_string(), swift_config);
         
         Self {
             runtimes,
@@ -356,13 +502,13 @@ mod tests {
 
     #[test]
     fn test_runtime_type_parsing() {
-        assert_eq!(RuntimeType::from_str("python"), Some(RuntimeType::Python));
-        assert_eq!(RuntimeType::from_str("py"), Some(RuntimeType::Python));
-        assert_eq!(RuntimeType::from_str("nodejs"), Some(RuntimeType::NodeJS));
-        assert_eq!(RuntimeType::from_str("node"), Some(RuntimeType::NodeJS));
-        assert_eq!(RuntimeType::from_str("javascript"), Some(RuntimeType::NodeJS));
-        assert_eq!(RuntimeType::from_str("rust"), Some(RuntimeType::Rust));
-        assert_eq!(RuntimeType::from_str("unknown"), None);
+        assert_eq!(RuntimeType::from_str_opt("python"), Some(RuntimeType::Python));
+        assert_eq!(RuntimeType::from_str_opt("py"), Some(RuntimeType::Python));
+        assert_eq!(RuntimeType::from_str_opt("nodejs"), Some(RuntimeType::NodeJS));
+        assert_eq!(RuntimeType::from_str_opt("node"), Some(RuntimeType::NodeJS));
+        assert_eq!(RuntimeType::from_str_opt("javascript"), Some(RuntimeType::NodeJS));
+        assert_eq!(RuntimeType::from_str_opt("rust"), Some(RuntimeType::Rust));
+        assert_eq!(RuntimeType::from_str_opt("unknown"), None);
     }
 
     #[test]

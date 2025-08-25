@@ -27,6 +27,9 @@ pub mod runtime;
 // Template management
 pub mod template;
 
+// E2B API compatibility
+pub mod e2b;
+
 // Session management
 pub mod session;
 

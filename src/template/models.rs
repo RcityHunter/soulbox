@@ -5,49 +5,10 @@ use uuid::Uuid;
 
 use super::TemplateError;
 
-/// Template runtime types
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum RuntimeType {
-    Python,
-    Node,
-    Rust,
-    Go,
-    Java,
-    Docker,
-    Firecracker,
-}
+/// Template runtime types (using runtime module's RuntimeType)
+use crate::runtime::RuntimeType;
 
-impl std::fmt::Display for RuntimeType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RuntimeType::Python => write!(f, "python"),
-            RuntimeType::Node => write!(f, "node"),
-            RuntimeType::Rust => write!(f, "rust"),
-            RuntimeType::Go => write!(f, "go"),
-            RuntimeType::Java => write!(f, "java"),
-            RuntimeType::Docker => write!(f, "docker"),
-            RuntimeType::Firecracker => write!(f, "firecracker"),
-        }
-    }
-}
-
-impl std::str::FromStr for RuntimeType {
-    type Err = String;
-    
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "python" => Ok(RuntimeType::Python),
-            "node" | "nodejs" | "javascript" => Ok(RuntimeType::Node),
-            "rust" => Ok(RuntimeType::Rust),
-            "go" | "golang" => Ok(RuntimeType::Go),
-            "java" => Ok(RuntimeType::Java),
-            "docker" => Ok(RuntimeType::Docker),
-            "firecracker" => Ok(RuntimeType::Firecracker),
-            _ => Err(format!("Unsupported runtime type: {}", s)),
-        }
-    }
-}
+// RuntimeType Display and FromStr are already implemented in runtime module
 
 /// Resource limits for template
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -337,7 +298,7 @@ impl Template {
         let mut template = Template::new(
             "Node.js 18".to_string(),
             "node-18".to_string(),
-            RuntimeType::Node,
+            RuntimeType::NodeJS,
             "node:18-slim".to_string(),
         );
 

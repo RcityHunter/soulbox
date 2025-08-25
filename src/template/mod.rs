@@ -3,12 +3,14 @@ pub mod manager;
 pub mod storage;
 pub mod file_storage;
 pub mod dockerfile;
+pub mod repository;
 
 pub use models::{Template, TemplateVersion, TemplateMetadata, TemplateValidationResult, TemplateFile, TemplateFileUpload};
 pub use manager::TemplateManager;
 pub use storage::TemplateStorage;
 pub use file_storage::TemplateFileStorage;
 pub use dockerfile::{DockerfileParser, DockerImageBuilder};
+pub use repository::{TemplateRepository, TemplateRepositoryConfig};
 
 use crate::error::SoulBoxError;
 
