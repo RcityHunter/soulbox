@@ -63,6 +63,12 @@ pub enum Commands {
     
     /// List sandboxes
     List(commands::list::ListArgs),
+    
+    /// Manage templates
+    Template(commands::template::TemplateArgs),
+    
+    /// Show system status
+    Status(commands::status::StatusArgs),
 }
 
 impl Cli {
@@ -100,6 +106,8 @@ impl Cli {
             Commands::Stop(args) => args.execute().await,
             Commands::Logs(args) => commands::logs::run(args, &config).await,
             Commands::List(args) => commands::list::run(args, &config).await,
+            Commands::Template(args) => commands::template::run(args, &config).await,
+            Commands::Status(args) => commands::status::run(args, &config).await,
         }
     }
 

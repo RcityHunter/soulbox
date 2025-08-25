@@ -9,6 +9,8 @@ pub mod logs;
 pub mod list;
 pub mod run;
 pub mod stop;
+pub mod template;
+pub mod status;
 
 // Re-export command argument structs
 pub use init::InitArgs;
@@ -18,3 +20,5 @@ pub use logs::LogsArgs;
 pub use list::ListArgs;
 pub use run::RunArgs;
 pub use stop::StopArgs;
+pub use template::TemplateArgs;
+pub use status::StatusArgs;
