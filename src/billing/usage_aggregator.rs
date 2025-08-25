@@ -394,7 +394,7 @@ impl UsageAggregator {
     async fn read_metrics_for_aggregation(
         conn: &mut redis::aio::MultiplexedConnection,
         config: &BillingConfig,
-        consumer_name: &str,
+        _consumer_name: &str,
     ) -> Result<Vec<UsageMetric>> {
         use redis::streams::StreamReadOptions;
 

@@ -318,7 +318,7 @@ impl SoulBoxService for SoulBoxServiceImpl {
             Err(e) => {
                 error!("Failed to remove container for sandbox {}: {}", req.sandbox_id, e);
                 // Re-add to sandboxes since container removal failed
-                let sandboxes = self.sandboxes.lock().await;
+                let _sandboxes = self.sandboxes.lock().await;
                 // We could restore the sandbox info here, but for simplicity we'll just return error
                 Err(Status::internal("Failed to remove sandbox container"))
             }

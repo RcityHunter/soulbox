@@ -415,7 +415,7 @@ impl SessionRecoveryService {
     /// Get the last checkpoint time for a session
     async fn get_last_checkpoint_time(&self, session_id: &Uuid) -> Result<Option<DateTime<Utc>>> {
         // Look for checkpoint files in the storage directory
-        let checkpoint_pattern = format!("checkpoint_{}_*.json", session_id);
+        let _checkpoint_pattern = format!("checkpoint_{}_*.json", session_id);
         let storage_dir = std::path::Path::new("/tmp/soulbox/checkpoints");
         
         if !storage_dir.exists() {

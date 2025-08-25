@@ -243,7 +243,7 @@ impl SnapshotManager {
 
     /// Capture current container state
     async fn capture_container_state(&self, container_id: &str) -> Result<ContainerSnapshot> {
-        let container = self.container_manager.get_container(container_id).await
+        let _container = self.container_manager.get_container(container_id).await
             .ok_or_else(|| SoulBoxError::not_found(format!("Container not found: {}", container_id)))?;
         
         // Get container stats - simplified for MVP

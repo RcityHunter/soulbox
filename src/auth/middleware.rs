@@ -307,13 +307,13 @@ impl AuthMiddleware {
         move |request: Request, next: Next| {
             Box::pin(async move {
                 // 从请求扩展中获取认证上下文
-                let auth_context = request
+                let _auth_context = request
                     .extensions()
                     .get::<AuthContext>()
                     .ok_or(StatusCode::UNAUTHORIZED)?;
 
                 // Extract tenant ID from request path or headers
-                let tenant_id = extract_tenant_id_from_request(&request);
+                let _tenant_id = extract_tenant_id_from_request(&request);
                 
                 // 检查租户访问权限
                 // if !auth_context.can_access_tenant(&tenant_id) {

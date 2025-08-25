@@ -48,8 +48,8 @@ impl FirecrackerManager {
         sandbox_id: &str,
         template: &str,
         resource_limits: ResourceLimits,
-        network_config: ContainerNetworkConfig,
-        env_vars: HashMap<String, String>,
+        _network_config: ContainerNetworkConfig,
+        _env_vars: HashMap<String, String>,
     ) -> Result<Arc<FirecrackerVM>> {
         info!("Creating Firecracker VM for sandbox: {}", sandbox_id);
 

@@ -191,7 +191,7 @@ async fn record_usage(
 /// Get real-time usage for the authenticated user
 async fn get_realtime_usage(
     State(state): State<BillingApiState>,
-    Query(_params): Query<UsageQuery>,
+    Query(params): Query<UsageQuery>,
     auth: AuthExtractor,
 ) -> Result<Json<Vec<RealtimeUsageResponse>>> {
     let user_id = auth.0.user_id;
@@ -426,7 +426,7 @@ async fn get_user_invoices(
 /// Get a specific invoice
 async fn get_invoice(
     State(state): State<BillingApiState>,
-    Path(invoice_id): Path<Uuid>,
+    Path(_invoice_id): Path<Uuid>,
     auth: AuthExtractor,
 ) -> Result<Json<InvoiceResponse>> {
     let _user_id = auth.0.user_id;
@@ -443,7 +443,7 @@ pub struct UpdateInvoiceStatusRequest {
 
 async fn update_invoice_status(
     State(state): State<BillingApiState>,
-    Path(invoice_id): Path<Uuid>,
+    Path(_invoice_id): Path<Uuid>,
     auth: AuthExtractor,
     Json(request): Json<UpdateInvoiceStatusRequest>,
 ) -> Result<StatusCode> {

@@ -11,7 +11,6 @@ use crate::error::{Result, SoulBoxError};
 use std::collections::HashMap;
 use std::str::FromStr;
 use uuid::Uuid;
-use chrono::Utc;
 
 /// Adapter for converting between E2B and SoulBox models
 pub struct E2BAdapter;
@@ -23,7 +22,7 @@ impl E2BAdapter {
     ) -> Result<SandboxConfig> {
         use crate::sandbox::provider::ResourceLimits as ProviderResourceLimits;
         
-        let mut config = SandboxConfig {
+        let config = SandboxConfig {
             name: request.metadata.as_ref().and_then(|m| m.get("name").and_then(|v| v.as_str().map(|s| s.to_string()))),
             image: "python:3.11-slim".to_string(), // Default image
             working_directory: request.cwd.clone().unwrap_or_else(|| "/workspace".to_string()),
@@ -148,7 +147,7 @@ impl E2BAdapter {
     /// Convert E2B file operation to filesystem operations
     /// Note: Returns operation type as string since FileOperation enum is not exported
     pub fn convert_file_operation(op: &E2BFileOperation) -> Result<(String, HashMap<String, String>)> {
-        let (op_type, mut params) = match op {
+        let (op_type, params) = match op {
             E2BFileOperation::Read { path } => {
                 ("read", vec![("path", path.clone())])
             }

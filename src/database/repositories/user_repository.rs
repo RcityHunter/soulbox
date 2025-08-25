@@ -210,7 +210,7 @@ impl UserRepository {
         let record_id = uuid_to_record_id("users", user.id);
         
         // Use direct SurrealQL with parameter binding to prevent SQL injection
-        let sql = if let Some(tenant_id) = user.tenant_id {
+        let sql = if let Some(_tenant_id) = user.tenant_id {
             "UPDATE $record_id SET username = $username, email = $email, role = $role, is_active = $is_active, tenant_id = $tenant_id, updated_at = time::now()"
         } else {
             "UPDATE $record_id SET username = $username, email = $email, role = $role, is_active = $is_active, tenant_id = NONE, updated_at = time::now()"

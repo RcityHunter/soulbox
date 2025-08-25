@@ -16,6 +16,7 @@ pub mod simple_aggregator;
 pub mod precision;
 pub mod error_handling;
 pub mod test_config;
+pub mod stripe_integration;
 
 #[cfg(test)]
 mod tests;

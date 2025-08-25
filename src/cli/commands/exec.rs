@@ -62,7 +62,7 @@ pub struct ExecArgs {
     pub verbose: bool,
 }
 
-pub async fn run(args: ExecArgs, config: &CliConfig) -> Result<()> {
+pub async fn run(args: ExecArgs, _config: &CliConfig) -> Result<()> {
     // Determine sandbox to use
     let sandbox_id = args.sandbox.unwrap_or_else(|| {
         // Try to find a running sandbox or use default

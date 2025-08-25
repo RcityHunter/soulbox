@@ -131,7 +131,7 @@ pub async fn run(args: ListArgs, config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
-async fn fetch_sandboxes(args: &ListArgs, _config: &CliConfig) -> Result<Vec<SandboxInfo>> {
+async fn fetch_sandboxes(_args: &ListArgs, _config: &CliConfig) -> Result<Vec<SandboxInfo>> {
     debug!("Fetching sandbox list from server");
     
     // Simulate API call

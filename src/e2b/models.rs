@@ -3,7 +3,6 @@
 //! Data structures compatible with E2B's API
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 

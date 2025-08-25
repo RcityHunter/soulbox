@@ -251,7 +251,7 @@ impl StreamManager {
         
         let subscriber = StreamSubscriber {
             id: subscriber_id,
-            connection_id,
+            connection_id: connection_id.clone(),
             stream_id,
             receiver: stream.sender.subscribe(),
             filters,

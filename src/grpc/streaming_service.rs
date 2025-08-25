@@ -55,7 +55,7 @@ impl StreamingService for StreamingServiceImpl {
                         match req.request {
                             Some(sandbox_stream_request::Request::Init(init)) => {
                                 sandbox_id = init.sandbox_id.clone();
-                                stream_type = StreamType::from_i32(init.stream_type).unwrap_or(StreamType::Unspecified);
+                                stream_type = StreamType::try_from(init.stream_type).unwrap_or(StreamType::Unspecified);
                                 stream_id = format!("stream_{}", Uuid::new_v4().to_string().replace("-", "")[..8].to_lowercase());
                                 
                                 // Store active stream
@@ -219,7 +219,7 @@ impl StreamingService for StreamingServiceImpl {
                                 });
                                 
                                 // Send initial shell prompt
-                                let shell_prompt = if let Some(config) = &terminal_config {
+                                let shell_prompt = if let Some(_config) = &terminal_config {
                                     format!("{}@soulbox:{}$ ", "user", "/workspace")
                                 } else {
                                     "user@soulbox:/workspace$ ".to_string()
@@ -291,7 +291,7 @@ impl StreamingService for StreamingServiceImpl {
                                 
                                 // Send new prompt after processing command
                                 if input_str.contains('\n') && !input_str.trim().is_empty() {
-                                    let shell_prompt = if let Some(config) = &terminal_config {
+                                    let shell_prompt = if let Some(_config) = &terminal_config {
                                         format!("user@soulbox:/workspace$ ")
                                     } else {
                                         "user@soulbox:/workspace$ ".to_string()
@@ -311,7 +311,7 @@ impl StreamingService for StreamingServiceImpl {
                                 info!("Terminal resize: {}x{}", resize.cols, resize.rows);
                                 // In a real implementation, we would resize the terminal
                             }
-                            Some(terminal_stream_request::Request::Close(close)) => {
+                            Some(terminal_stream_request::Request::Close(_close)) => {
                                 // Handle terminal close
                                 yield Ok(TerminalStreamResponse {
                                     response: Some(terminal_stream_response::Response::Closed(

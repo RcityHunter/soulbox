@@ -379,7 +379,7 @@ impl WebSocketHandler {
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
     {
         let sandbox_id = message.payload["sandbox_id"].as_str().unwrap_or("");
-        let stream_type = message.payload["stream_type"].as_str().unwrap_or("");
+        let _stream_type = message.payload["stream_type"].as_str().unwrap_or("");
 
         if sandbox_id.is_empty() {
             let error_response = WebSocketResponse::error("Sandbox ID is required", Some("MISSING_SANDBOX_ID"));
@@ -551,7 +551,7 @@ impl WebSocketHandler {
 
     async fn handle_simulate_file_event<S>(
         &self,
-        _connection_id: &str,
+        connection_id: &str,
         message: &WebSocketMessage,
         ws_stream: &mut WebSocketStream<S>,
     ) -> Result<()>
@@ -570,7 +570,7 @@ impl WebSocketHandler {
 
     async fn handle_create_sandbox<S>(
         &self,
-        _connection_id: &str,
+        connection_id: &str,
         message: &WebSocketMessage,
         ws_stream: &mut WebSocketStream<S>,
     ) -> Result<()>

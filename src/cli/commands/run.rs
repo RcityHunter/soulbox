@@ -44,7 +44,7 @@ impl RunArgs {
         info!("Running code in sandbox: {}", self.sandbox);
 
         // Get the code to execute
-        let code = if let Some(ref file_path) = self.file {
+        let _code = if let Some(ref file_path) = self.file {
             // Read code from file
             debug!("Reading code from file: {:?}", file_path);
             let mut file = tokio::fs::File::open(file_path).await?;

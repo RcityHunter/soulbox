@@ -1,8 +1,7 @@
 //! Simplified E2B API Service - Basic REST API endpoints compatible with E2B
 
-use crate::e2b::{models::*, adapter::E2BAdapter, E2BError};
+use crate::e2b::{models::*, adapter::E2BAdapter};
 use crate::template::TemplateManager;
-use crate::error::Result;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -15,7 +14,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use std::collections::HashMap;
 use uuid::Uuid;
-use tracing::{info, error, debug};
+use tracing::{info, debug};
 
 /// Simplified E2B API service state
 #[derive(Clone)]

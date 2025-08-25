@@ -189,7 +189,7 @@ impl SimpleUsageAggregator {
 
     /// Aggregate metrics for a specific hour
     async fn aggregate_hour(
-        storage: &Arc<BillingStorage>,
+        _storage: &Arc<BillingStorage>,
         start_time: DateTime<Utc>,
         end_time: DateTime<Utc>,
     ) -> Result<()> {

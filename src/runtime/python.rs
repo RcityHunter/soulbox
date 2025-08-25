@@ -305,7 +305,7 @@ impl PythonRuntime {
 
         // Check for basic Python syntax errors
         let lines: Vec<&str> = code.lines().collect();
-        let indent_stack = vec![0];
+        let _indent_stack = vec![0];
         
         for (line_num, line) in lines.iter().enumerate() {
             let trimmed = line.trim();

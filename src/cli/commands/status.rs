@@ -4,11 +4,11 @@
 
 use clap::Args;
 use colored::*;
-use prettytable::{Table, row, cell, format};
+use prettytable::{Table, row, format};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
 
-use crate::cli::{Cli, CliConfig};
+use crate::cli::CliConfig;
 use crate::error::Result;
 
 #[derive(Args)]
@@ -356,7 +356,7 @@ fn print_resource_bar(name: &str, percent: f64, max: f64) {
     println!("  {:8} [{}] {:.1}%", format!("{}:", name).bold(), bar, percent);
 }
 
-fn print_json_status(status: &SystemStatus) {
+fn print_json_status(_status: &SystemStatus) {
     // Mock JSON output
     let json = r#"{
   "overall_health": "Healthy",
@@ -388,7 +388,7 @@ fn print_json_status(status: &SystemStatus) {
     println!("{}", json);
 }
 
-fn print_yaml_status(status: &SystemStatus) {
+fn print_yaml_status(_status: &SystemStatus) {
     // Mock YAML output
     let yaml = r#"overall_health: Healthy
 services:

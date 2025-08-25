@@ -4,15 +4,15 @@
 //! including versioning, caching, and repository operations.
 
 use crate::template::{
-    Template, TemplateVersion, TemplateError, TemplateMetadata,
-    TemplateStorage, TemplateFileStorage, TemplateManager,
+    Template, TemplateVersion, TemplateError,
+    TemplateStorage, TemplateFileStorage,
 };
 use crate::error::Result as SoulBoxResult;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn, debug, error};
+use tracing::{info, debug};
 use uuid::Uuid;
 
 /// Template repository configuration

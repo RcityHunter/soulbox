@@ -332,7 +332,7 @@ impl SandboxRepository {
         let owner_record_id = uuid_to_record_id("users", owner_id);
         
         // Simple query without complex pagination for MVP
-        let sql = if let Some(status) = status {
+        let sql = if let Some(_status) = status {
             "SELECT * FROM sandboxes WHERE owner_id = $owner_id AND status = $status ORDER BY created_at DESC LIMIT $limit"
         } else {
             "SELECT * FROM sandboxes WHERE owner_id = $owner_id ORDER BY created_at DESC LIMIT $limit"

@@ -329,7 +329,7 @@ async fn list_api_keys(
     info!("Listing API keys for user: {}", auth.0.username);
 
     // Get user's API keys from database
-    if let Some(user_repo) = &auth_state.user_repository {
+    if let Some(_user_repo) = &auth_state.user_repository {
         // TODO: Implement API key listing when UserRepository supports it
         // match user_repo.get_user_api_keys(&auth.0.user_id).await {
         match Ok::<Vec<crate::auth::api_key::ApiKey>, crate::database::DatabaseError>(Vec::new()) {
@@ -449,7 +449,7 @@ async fn revoke_api_key(
     info!("Revoking API key: {} for user: {}", key_id, auth.0.username);
 
     // Revoke API key from database
-    if let Some(user_repo) = &auth_state.user_repository {
+    if let Some(_user_repo) = &auth_state.user_repository {
         // TODO: Implement API key revocation when UserRepository supports it
         // match user_repo.revoke_api_key(&key_id, &auth.0.user_id).await {
         match Ok::<(), crate::database::DatabaseError>(()) {

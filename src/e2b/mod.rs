@@ -13,7 +13,7 @@ pub use models::{E2BSandbox, E2BProcess, E2BFilesystem};
 pub use client::E2BClient;
 pub use adapter::E2BAdapter;
 
-use crate::error::{Result, SoulBoxError};
+use crate::error::SoulBoxError;
 
 /// E2B compatibility configuration
 #[derive(Debug, Clone)]

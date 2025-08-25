@@ -234,7 +234,7 @@ impl AuditService {
     }
     
     /// 创建带数据库支持的审计服务
-    pub fn with_database(config: AuditConfig, database: Arc<SurrealPool>) -> SoulBoxResult<Arc<Self>> {
+    pub fn with_database(config: AuditConfig, _database: Arc<SurrealPool>) -> SoulBoxResult<Arc<Self>> {
         let storage = Arc::new(RwLock::new(AuditStorage::new(config.max_memory_logs)));
         let (sender, receiver) = mpsc::unbounded_channel();
         // Temporarily disabled: let repository = Arc::new(AuditRepository::new(database));

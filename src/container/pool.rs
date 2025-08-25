@@ -988,7 +988,7 @@ impl ContainerPool {
         config: &PoolConfig,
         stats: &Arc<RwLock<PoolStats>>,
         container_manager: &Arc<ContainerManager>,
-        predictor: &Arc<RwLock<DemandPredictor>>,
+        _predictor: &Arc<RwLock<DemandPredictor>>,
     ) -> Result<()> {
         let max_idle = Duration::from_secs(config.max_idle_time);
         let mut containers_to_destroy = Vec::new();
@@ -997,8 +997,8 @@ impl ContainerPool {
         // Check each runtime pool level
         {
             let mut hot_pools_guard = hot_pools.write().await;
-            let mut warm_pools_guard = warm_pools.write().await;
-            let mut cold_pools_guard = cold_pools.write().await;
+            let _warm_pools_guard = warm_pools.write().await;
+            let _cold_pools_guard = cold_pools.write().await;
             
             // Process hot pools
             for (runtime, pool) in hot_pools_guard.iter_mut() {
@@ -1252,7 +1252,7 @@ impl ContainerPool {
         let mut usage_patterns = HashMap::new();
         
         let hot_pools = self.hot_pools.read().await;
-        let stats = self.stats.read().await;
+        let _stats = self.stats.read().await;
         
         for (runtime, pool) in hot_pools.iter() {
             let usage_pattern = RuntimeUsagePattern {
@@ -1363,7 +1363,7 @@ impl ContainerPool {
         unhealthy_containers: &mut Vec<String>,
     ) {
         let mut pools_guard = pools.write().await;
-        for (runtime, pool) in pools_guard.iter_mut() {
+        for (_runtime, pool) in pools_guard.iter_mut() {
             let mut healthy_containers = VecDeque::new();
             
             while let Some(mut container) = pool.pop_front() {

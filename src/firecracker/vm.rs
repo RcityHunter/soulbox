@@ -151,7 +151,7 @@ impl FirecrackerVM {
         
         if let Some(vsock_config) = &self.config.vsock_config {
             // Connect to the VM via vsock
-            let socket_path = &vsock_config.uds_path;
+            let _socket_path = &vsock_config.uds_path;
             
             // In a real implementation, we'd have an agent running inside the VM
             // that listens on vsock and executes commands

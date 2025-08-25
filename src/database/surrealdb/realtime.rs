@@ -36,7 +36,7 @@ impl RealtimeManager {
         conn: &SurrealConnection,
         sandbox_id: Option<Uuid>,
     ) -> SurrealResult<Pin<Box<dyn Stream<Item = RealtimeNotification> + Send>>> {
-        let sql = if let Some(id) = sandbox_id {
+        let sql = if let Some(_id) = sandbox_id {
             "LIVE SELECT * FROM sandboxes WHERE id = $sandbox_id"
         } else {
             "LIVE SELECT * FROM sandboxes"
@@ -45,10 +45,10 @@ impl RealtimeManager {
         debug!("Starting sandbox status watch: {}", sql);
         
         // Create a proper SurrealDB live query
-        let mut query = conn.db().query(sql);
+        let mut _query = conn.db().query(sql);
         if let Some(id) = sandbox_id {
             let record_id = uuid_to_record_id("sandboxes", id);
-            query = query.bind(("sandbox_id", record_id));
+            _query = _query.bind(("sandbox_id", record_id));
         }
         
         // Note: SurrealDB live query API has changed
@@ -82,14 +82,14 @@ impl RealtimeManager {
     
     /// Watch user activity (audit logs) using SurrealDB LIVE SELECT
     pub async fn watch_user_activity(
-        conn: &SurrealConnection,
+        _conn: &SurrealConnection,
         user_id: Uuid,
     ) -> SurrealResult<Pin<Box<dyn Stream<Item = RealtimeNotification> + Send>>> {
         let sql = "LIVE SELECT * FROM audit_logs WHERE user_id = $user_id";
         
         debug!("Starting user activity watch for {}: {}", user_id, sql);
         
-        let user_record_id = uuid_to_record_id("users", user_id);
+        let _user_record_id = uuid_to_record_id("users", user_id);
         
         // Note: SurrealDB live query API has changed
         // This is a placeholder implementation
@@ -121,14 +121,14 @@ impl RealtimeManager {
     
     /// Watch tenant resource usage using SurrealDB LIVE SELECT
     pub async fn watch_tenant_resources(
-        conn: &SurrealConnection,
+        _conn: &SurrealConnection,
         tenant_id: Uuid,
     ) -> SurrealResult<Pin<Box<dyn Stream<Item = RealtimeNotification> + Send>>> {
         let sql = "LIVE SELECT * FROM sandboxes WHERE tenant_id = $tenant_id";
         
         debug!("Starting tenant resource watch for {}: {}", tenant_id, sql);
         
-        let tenant_record_id = uuid_to_record_id("tenants", tenant_id);
+        let _tenant_record_id = uuid_to_record_id("tenants", tenant_id);
         
         // Note: SurrealDB live query API has changed
         // This is a placeholder implementation
@@ -168,18 +168,10 @@ impl RealtimeManager {
         info!("Global database watch is disabled for security reasons");
         
         // Return an empty stream that immediately ends
-        let stream = stream! {
-            // Empty stream - no global watching allowed
-            return;
-            yield RealtimeNotification {
-                table: "global".to_string(),
-                id: "disabled".to_string(),
-                event: RealtimeEvent::Create { data: serde_json::Value::Null },
-                timestamp: chrono::Utc::now(),
-            };
-        };
+        use futures_util::stream;
+        let empty_stream = stream::empty::<RealtimeNotification>();
         
-        Ok(Box::pin(stream))
+        Ok(Box::pin(empty_stream))
     }
     
     /// Create a multiplexed stream that combines multiple live queries
@@ -193,18 +185,10 @@ impl RealtimeManager {
         warn!("Multiplexed watch is disabled for security reasons. {} queries rejected", queries.len());
         
         // Return an empty stream
-        let stream = stream! {
-            // Empty stream - multiplexed watching disabled for security
-            return;
-            yield RealtimeNotification {
-                table: "multiple".to_string(),
-                id: "disabled".to_string(),
-                event: RealtimeEvent::Create { data: serde_json::Value::Null },
-                timestamp: chrono::Utc::now(),
-            };
-        };
+        use futures_util::stream;
+        let empty_stream = stream::empty::<RealtimeNotification>();
         
-        Ok(Box::pin(stream))
+        Ok(Box::pin(empty_stream))
     }
 }
 

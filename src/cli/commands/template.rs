@@ -4,7 +4,7 @@
 
 use clap::{Args, Subcommand};
 use colored::*;
-use prettytable::{Table, row, cell};
+use prettytable::{Table, row};
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{Cli, CliConfig};

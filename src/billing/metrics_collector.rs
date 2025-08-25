@@ -399,7 +399,7 @@ impl MetricsCollector {
     async fn read_stream_batch(
         conn: &mut redis::aio::MultiplexedConnection,
         config: &BillingConfig,
-        consumer_name: &str,
+        _consumer_name: &str,
     ) -> Result<Vec<UsageMetric>> {
         let opts = StreamReadOptions::default()
             .count(config.batch_size)

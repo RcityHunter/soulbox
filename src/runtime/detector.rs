@@ -536,7 +536,7 @@ pub fn detect_runtime_from_content<'a>(content: &str, runtimes: &'a HashMap<Stri
     
     if let Some(result) = detector.detect_from_content(content) {
         // Find matching runtime configuration
-        for (name, config) in runtimes {
+        for (_name, config) in runtimes {
             if config.runtime_type == result.runtime_type {
                 return Some(config);
             }
