@@ -97,7 +97,7 @@ surrealdb = "1.0"
 redis = { version = "0.24", features = ["async-std-comp"] }
 
 # Additional dependencies for restored modules
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync"] }
 async-stream = "0.3"
 
 # System calls (for PTY terminal support)
